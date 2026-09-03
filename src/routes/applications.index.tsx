@@ -1,8 +1,13 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { Bot, ChevronRight, FileText, CheckCircle2, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/applications/")({
+  beforeLoad: () => {
+    if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) {
+      throw redirect({ to: "/login" });
+    }
+  },
   component: ApplicationsPage,
 });
 

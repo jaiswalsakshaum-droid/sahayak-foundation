@@ -1,4 +1,4 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, redirect } from "@tanstack/react-router";
 import { ArrowRight, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ActivityList, ApplicationRow, ApplicationTimeline, NextBestAction, ProgressStepper, SectionHeading } from "@/components/sahayak";
@@ -7,6 +7,70 @@ import { applications, activity, notifications } from "@/lib/mock-data";
 import { NotificationCard } from "@/components/sahayak";
 import { AppShell } from "@/components/sahayak";
 
-export const Route = createFileRoute("/dashboard")({ head: () => ({ meta: [{ title: "Dashboard — Sahayak" }, { name: "description", content: "See Rahul Sharma's government benefit journey and next best action." }, { property: "og:title", content: "Dashboard — Sahayak" }, { property: "og:description", content: "Your Sahayak journey from eligibility to action." }, { property: "og:type", content: "website" }, { name: "twitter:card", content: "summary_large_image" }] }), component: DashboardPage });
+export const Route = createFileRoute("/dashboard")({ 
+  head: () => ({ meta: [{ title: "Dashboard — Sahayak" }, { name: "description", content: "See Rahul Sharma's government benefit journey and next best action." }] }),
+  beforeLoad: () => {
+    if (typeof window !== 'undefined' && !localStorage.getItem("sahayak_auth")) {
+      throw redirect({ to: "/login" });
+    }
+  },
+  component: DashboardPage 
+});
 
-function DashboardPage() { return <AppShell><div className="space-y-6"><div><div className="flex items-center gap-2 text-[11px] text-brand-soft"><span className="size-1.5 animate-pulse-dot rounded-full bg-sage" />Live orchestration · 6 agents coordinated</div><h1 className="mt-2 font-display text-3xl font-semibold tracking-tight">Good afternoon, Rahul</h1><p className="mt-1 text-sm text-muted-foreground">20 · Lucknow, Uttar Pradesh · Undergraduate student · Annual household income ₹2,10,000</p></div><ProgressStepper /><div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><MetricCard label="Benefits discovered" value="3" detail="+1 this week" /><MetricCard label="Applications in progress" value="2" detail="1 needs action" tone="warning" /><MetricCard label="Documents verified" value="5/6" detail="" tone="success" progress={83} /><MetricCard label="Actions required" value="2" detail="Due in 3 days" tone="critical" /></div><NextBestAction /><div className="grid gap-6 xl:grid-cols-[1.45fr_0.85fr]"><div className="space-y-6"><section><SectionHeading title="Active applications" action={<Button asChild variant="link" size="sm" className="text-brand"><Link to="/applications">View all <ArrowRight /></Link></Button>} /><div className="space-y-3">{applications.map((application) => <ApplicationRow key={application.id} application={application} />)}</div></section><section><SectionHeading title="Progress timeline" /><ApplicationTimeline /></section></div><div className="space-y-6"><section><SectionHeading title="Recent AI activity" /><ActivityList items={activity} /></section><section><SectionHeading title="Notifications" action={<Button asChild variant="link" size="sm" className="text-brand"><Link to="/notifications">View all</Link></Button>} /><div className="rounded-xl border border-line bg-card p-4 shadow-none">{notifications.map((notification) => <NotificationCard key={notification.title} {...notification} />)}</div></section></div></div><div className="rounded-xl border border-line bg-card p-4 text-sm text-muted-foreground"><span className="font-medium text-foreground">Your connected ecosystem:</span> Sahayak works alongside myScheme, UMANG and DigiLocker — it never replaces them.<Button asChild variant="link" size="sm" className="ml-1 px-1 text-brand"><Link to="/profile">Manage connections <ChevronRight /></Link></Button></div></div></AppShell>; }
+function DashboardPage() { 
+  return (
+    <AppShell>
+      <div className="space-y-6">
+        <div>
+          <div className="flex items-center gap-2 text-[11px] text-brand-soft">
+            <span className="size-1.5 animate-pulse-dot rounded-full bg-sage" />Live orchestration · 6 agents coordinated
+          </div>
+          <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight">Good afternoon, Rahul</h1>
+          <p className="mt-1 text-sm text-muted-foreground">20 · Lucknow, Uttar Pradesh · Undergraduate student · Annual household income ₹2,10,000</p>
+        </div>
+        
+        <ProgressStepper />
+        
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <MetricCard label="Benefits discovered" value="3" detail="+1 this week" />
+          <MetricCard label="Applications in progress" value="2" detail="1 needs action" tone="warning" />
+          <MetricCard label="Documents verified" value="5/6" detail="" tone="success" progress={83} />
+          <MetricCard label="Actions required" value="2" detail="Due in 3 days" tone="critical" />
+        </div>
+        
+        <NextBestAction />
+        
+        <div className="grid gap-6 xl:grid-cols-[1.45fr_0.85fr]">
+          <div className="space-y-6">
+            <section>
+              <SectionHeading title="Active applications" action={<Button asChild variant="link" size="sm" className="text-brand"><Link to="/applications">View all <ArrowRight /></Link></Button>} />
+              <div className="space-y-3">{applications.map((application) => <ApplicationRow key={application.id} application={application} />)}</div>
+            </section>
+            <section>
+              <SectionHeading title="Progress timeline" />
+              <ApplicationTimeline />
+            </section>
+          </div>
+          
+          <div className="space-y-6">
+            <section>
+              <SectionHeading title="Recent AI activity" />
+              <ActivityList items={activity} />
+            </section>
+            <section>
+              <SectionHeading title="Notifications" action={<Button asChild variant="link" size="sm" className="text-brand"><Link to="/notifications">View all</Link></Button>} />
+              <div className="rounded-xl border border-line bg-card p-4 shadow-none">{notifications.map((notification) => <NotificationCard key={notification.title} {...notification} />)}</div>
+            </section>
+          </div>
+        </div>
+        
+        <div className="rounded-xl border border-line bg-card p-4 text-sm text-muted-foreground">
+          <span className="font-medium text-foreground">Your connected ecosystem:</span> Sahayak works alongside myScheme, UMANG and DigiLocker — it never replaces them.
+          <Button asChild variant="link" size="sm" className="ml-1 px-1 text-brand">
+            <Link to="/profile">Manage connections <ChevronRight /></Link>
+          </Button>
+        </div>
+      </div>
+    </AppShell>
+  ); 
+}

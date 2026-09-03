@@ -13,7 +13,6 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as AssistantRouteImport } from './routes/assistant'
 import { Route as DashboardRouteImport } from './routes/dashboard'
-import { Route as DemoRouteImport } from './routes/demo'
 import { Route as DocumentsRouteImport } from './routes/documents'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as NotificationsRouteImport } from './routes/notifications'
@@ -44,11 +43,6 @@ const AssistantRoute = AssistantRouteImport.update({
 const DashboardRoute = DashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DemoRoute = DemoRouteImport.update({
-  id: '/demo',
-  path: '/demo',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DocumentsRoute = DocumentsRouteImport.update({
@@ -112,7 +106,6 @@ export interface FileRoutesByFullPath {
   '/analytics': typeof AnalyticsRoute
   '/assistant': typeof AssistantRoute
   '/dashboard': typeof DashboardRoute
-  '/demo': typeof DemoRoute
   '/documents': typeof DocumentsRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
@@ -130,7 +123,6 @@ export interface FileRoutesByTo {
   '/analytics': typeof AnalyticsRoute
   '/assistant': typeof AssistantRoute
   '/dashboard': typeof DashboardRoute
-  '/demo': typeof DemoRoute
   '/documents': typeof DocumentsRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
@@ -149,7 +141,6 @@ export interface FileRoutesById {
   '/analytics': typeof AnalyticsRoute
   '/assistant': typeof AssistantRoute
   '/dashboard': typeof DashboardRoute
-  '/demo': typeof DemoRoute
   '/documents': typeof DocumentsRoute
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
@@ -169,7 +160,6 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/assistant'
     | '/dashboard'
-    | '/demo'
     | '/documents'
     | '/login'
     | '/notifications'
@@ -187,7 +177,6 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/assistant'
     | '/dashboard'
-    | '/demo'
     | '/documents'
     | '/login'
     | '/notifications'
@@ -205,7 +194,6 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/assistant'
     | '/dashboard'
-    | '/demo'
     | '/documents'
     | '/login'
     | '/notifications'
@@ -224,7 +212,6 @@ export interface RootRouteChildren {
   AnalyticsRoute: typeof AnalyticsRoute
   AssistantRoute: typeof AssistantRoute
   DashboardRoute: typeof DashboardRoute
-  DemoRoute: typeof DemoRoute
   DocumentsRoute: typeof DocumentsRoute
   LoginRoute: typeof LoginRoute
   NotificationsRoute: typeof NotificationsRoute
@@ -266,13 +253,6 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof DashboardRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/demo': {
-      id: '/demo'
-      path: '/demo'
-      fullPath: '/demo'
-      preLoaderRoute: typeof DemoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/documents': {
@@ -360,7 +340,6 @@ const rootRouteChildren: RootRouteChildren = {
   AnalyticsRoute: AnalyticsRoute,
   AssistantRoute: AssistantRoute,
   DashboardRoute: DashboardRoute,
-  DemoRoute: DemoRoute,
   DocumentsRoute: DocumentsRoute,
   LoginRoute: LoginRoute,
   NotificationsRoute: NotificationsRoute,

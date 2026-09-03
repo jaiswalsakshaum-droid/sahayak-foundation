@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useState } from "react";
 import { Search, Bot, CheckCircle2, Loader2, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -6,6 +6,11 @@ import { understandCitizenNeed, findRelevantSchemes, type SchemeMatch } from "@/
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/schemes")({
+  beforeLoad: () => {
+    if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) {
+      throw redirect({ to: "/login" });
+    }
+  },
   component: SchemesPage,
 });
 

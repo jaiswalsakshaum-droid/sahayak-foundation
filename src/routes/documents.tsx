@@ -1,10 +1,15 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useState } from "react";
 import { UploadCloud, FileText, CheckCircle2, AlertTriangle, FileWarning, Bot, Loader2, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { validateDocument, type DocumentValidationResult } from "@/lib/services";
 
 export const Route = createFileRoute("/documents")({
+  beforeLoad: () => {
+    if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) {
+      throw redirect({ to: "/login" });
+    }
+  },
   component: DocumentsPage,
 });
 

@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useState, useEffect, useRef } from "react";
 import { 
   ArrowRight, Bot, CheckCircle2, ChevronRight, FileText, 
@@ -9,6 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/assistant")({
+  beforeLoad: () => {
+    if (typeof window !== 'undefined' && !localStorage.getItem("sahayak_auth")) {
+      throw redirect({ to: "/login" });
+    }
+  },
   component: AssistantPage,
 });
 
@@ -21,8 +26,8 @@ const examplePrompts = [
 
 const MOCK_SCHEMES = [
   {
-    id: "demo-1",
-    name: "National Scholarship Demo",
+    id: "sch-1",
+    name: "National Scholarship",
     match: 94,
     benefit: "₹25,000/year",
     reqDocs: ["Income Certificate", "Enrollment Certificate", "Identity Proof"],
@@ -31,7 +36,7 @@ const MOCK_SCHEMES = [
     lastVerified: "Today",
   },
   {
-    id: "demo-2",
+    id: "sch-2",
     name: "State Education Support (Sample)",
     match: 88,
     benefit: "₹15,000/year",
@@ -41,7 +46,7 @@ const MOCK_SCHEMES = [
     lastVerified: "2 days ago",
   },
   {
-    id: "demo-3",
+    id: "sch-3",
     name: "Girls Higher Education Grant",
     match: 82,
     benefit: "₹10,000 one-time",
@@ -173,7 +178,7 @@ function AssistantPage() {
             </div>
             <div className="ml-auto">
                <Button variant="outline" size="sm" onClick={() => { setInput(examplePrompts[0]); startWorkforce(); }}>
-                  Run full Sahayak demo
+                  Start Orchestration
                </Button>
             </div>
           </div>

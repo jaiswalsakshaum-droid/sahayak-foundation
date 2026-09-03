@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { 
   Bot, ShieldCheck, SearchCheck, ClipboardCheck, FileCheck2, FileText, Landmark,
@@ -8,6 +8,11 @@ import { Button } from "@/components/ui/button";
 import { MOCK_AGENT_EVENTS } from "@/lib/admin-services";
 
 export const Route = createFileRoute("/admin/agents")({
+  beforeLoad: () => {
+    if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) {
+      throw redirect({ to: "/login" });
+    }
+  },
   component: AdminAgentsPage,
 });
 
@@ -22,12 +27,12 @@ const AGENTS_DATA = [
 
 function AdminAgentsPage() {
   const [selectedAgent, setSelectedAgent] = useState<typeof AGENTS_DATA[0] | null>(null);
-  const [demoMode, setDemoMode] = useState(false);
+  const [simMode, setSimMode] = useState(false);
   const [activeNode, setActiveNode] = useState(0);
   const [events, setEvents] = useState<typeof MOCK_AGENT_EVENTS>([]);
 
   useEffect(() => {
-    if (!demoMode) {
+    if (!simMode) {
       setActiveNode(0);
       setEvents([]);
       return;
@@ -46,7 +51,7 @@ function AdminAgentsPage() {
     }, 1500);
     
     return () => clearInterval(interval);
-  }, [demoMode]);
+  }, [simMode]);
 
   return (
     <div className="min-h-screen bg-ice-2 text-foreground flex flex-col overflow-hidden">
@@ -71,31 +76,31 @@ function AdminAgentsPage() {
            <div className="bg-card rounded-xl border border-line p-5 shadow-sm">
              <div className="flex items-center justify-between mb-6">
                <h3 className="font-semibold text-sm uppercase tracking-wider text-muted-foreground">Collaboration Flow</h3>
-               <Button variant="outline" size="sm" onClick={() => setDemoMode(!demoMode)} className="h-7 text-xs">
-                 {demoMode ? "Stop Demo" : "Run Demo"}
+               <Button variant="outline" size="sm" onClick={() => setSimMode(!simMode)} className="h-7 text-xs">
+                 {simMode ? "Stop Simulation" : "Run Simulation"}
                </Button>
              </div>
              
              <div className="flex flex-col items-center">
-                <FlowBox label="Citizen" active={demoMode && activeNode === 0} />
-                <FlowArrow active={demoMode && activeNode === 1} />
+                <FlowBox label="Citizen" active={simMode && activeNode === 0} />
+                <FlowArrow active={simMode && activeNode === 1} />
                 
-                <FlowBox label="Citizen Agent" agentId="citizen" onClick={() => setSelectedAgent(AGENTS_DATA[0])} active={demoMode && activeNode === 1} />
-                <FlowArrow active={demoMode && activeNode === 2} />
+                <FlowBox label="Citizen Agent" agentId="citizen" onClick={() => setSelectedAgent(AGENTS_DATA[0])} active={simMode && activeNode === 1} />
+                <FlowArrow active={simMode && activeNode === 2} />
                 
-                <FlowBox label="Scheme Agent" agentId="scheme" onClick={() => setSelectedAgent(AGENTS_DATA[1])} active={demoMode && activeNode === 2} />
-                <FlowArrow active={demoMode && activeNode === 3} />
+                <FlowBox label="Scheme Agent" agentId="scheme" onClick={() => setSelectedAgent(AGENTS_DATA[1])} active={simMode && activeNode === 2} />
+                <FlowArrow active={simMode && activeNode === 3} />
                 
-                <FlowBox label="Eligibility Agent" agentId="eligibility" onClick={() => setSelectedAgent(AGENTS_DATA[2])} active={demoMode && activeNode === 3} />
-                <FlowArrow active={demoMode && activeNode === 4} />
+                <FlowBox label="Eligibility Agent" agentId="eligibility" onClick={() => setSelectedAgent(AGENTS_DATA[2])} active={simMode && activeNode === 3} />
+                <FlowArrow active={simMode && activeNode === 4} />
                 
-                <FlowBox label="Document Agent" agentId="document" onClick={() => setSelectedAgent(AGENTS_DATA[3])} active={demoMode && activeNode === 4} />
-                <FlowArrow active={demoMode && activeNode === 5} />
+                <FlowBox label="Document Agent" agentId="document" onClick={() => setSelectedAgent(AGENTS_DATA[3])} active={simMode && activeNode === 4} />
+                <FlowArrow active={simMode && activeNode === 5} />
                 
-                <FlowBox label="Eligibility Agent" agentId="eligibility" onClick={() => setSelectedAgent(AGENTS_DATA[2])} active={demoMode && activeNode === 5} />
-                <FlowArrow active={demoMode && activeNode === 6} />
+                <FlowBox label="Eligibility Agent" agentId="eligibility" onClick={() => setSelectedAgent(AGENTS_DATA[2])} active={simMode && activeNode === 5} />
+                <FlowArrow active={simMode && activeNode === 6} />
                 
-                <FlowBox label="Application Agent" agentId="application" onClick={() => setSelectedAgent(AGENTS_DATA[4])} active={demoMode && activeNode === 6} />
+                <FlowBox label="Application Agent" agentId="application" onClick={() => setSelectedAgent(AGENTS_DATA[4])} active={simMode && activeNode === 6} />
                 <FlowArrow />
                 
                 <FlowBox label="Human Approval" highlight />
@@ -202,13 +207,13 @@ function AdminAgentsPage() {
                 <Activity className="size-4 text-brand" />
                 <h3 className="font-semibold text-sm uppercase tracking-wider">Live Activity Stream</h3>
               </div>
-              {demoMode && <span className="flex size-2 rounded-full bg-rose-500 animate-pulse" />}
+              {simMode && <span className="flex size-2 rounded-full bg-rose-500 animate-pulse" />}
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {events.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-50">
                   <Activity className="size-8 mb-2" />
-                  <p className="text-sm">Run demo to simulate traffic</p>
+                  <p className="text-sm">Run simulation to simulate traffic</p>
                 </div>
               ) : (
                 events.map(event => (

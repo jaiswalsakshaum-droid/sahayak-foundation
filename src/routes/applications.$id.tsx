@@ -1,4 +1,4 @@
-import { createFileRoute, Link, useParams } from "@tanstack/react-router";
+import { createFileRoute, Link, useParams, redirect } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { 
   Bot, CheckCircle2, ChevronLeft, FileText, AlertTriangle, 
@@ -7,6 +7,11 @@ import {
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/applications/$id")({
+  beforeLoad: () => {
+    if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) {
+      throw redirect({ to: "/login" });
+    }
+  },
   component: ApplicationDetailPage,
 });
 
@@ -212,13 +217,7 @@ function ApplicationDetailPage() {
                   </div>
                 </div>
 
-                <div className="p-4 bg-amber/10 border border-amber/20 rounded-xl flex gap-3 text-amber-800">
-                  <AlertTriangle className="size-5 shrink-0" />
-                  <div className="text-sm">
-                    <p className="font-semibold mb-1">Demo Submission</p>
-                    <p>This is a simulated experience. Government portal integration is mocked and no real data was transmitted.</p>
-                  </div>
-                </div>
+
              </div>
           ) : (
             <>

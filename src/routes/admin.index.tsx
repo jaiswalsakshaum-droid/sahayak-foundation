@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, AreaChart, Area, LineChart, Line
@@ -7,6 +7,11 @@ import { Users, FileText, CheckCircle, Clock, Activity, Shield } from "lucide-re
 import { MOCK_ADMIN_METRICS } from "@/lib/admin-services";
 
 export const Route = createFileRoute("/admin/")({
+  beforeLoad: () => {
+    if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) {
+      throw redirect({ to: "/login" });
+    }
+  },
   component: AdminDashboard,
 });
 

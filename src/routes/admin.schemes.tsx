@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useState } from "react";
 import { 
   Search, Filter, CheckCircle2, ChevronRight, X, ExternalLink, Bot, AlertTriangle
@@ -7,6 +7,11 @@ import { Button } from "@/components/ui/button";
 import { MOCK_SCHEMES_DATA } from "@/lib/admin-services";
 
 export const Route = createFileRoute("/admin/schemes")({
+  beforeLoad: () => {
+    if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) {
+      throw redirect({ to: "/login" });
+    }
+  },
   component: AdminSchemesPage,
 });
 

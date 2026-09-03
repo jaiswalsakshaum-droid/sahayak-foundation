@@ -1,8 +1,13 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { Bell, CheckCircle2, AlertTriangle, FileWarning, ArrowRight, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/notifications")({
+  beforeLoad: () => {
+    if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) {
+      throw redirect({ to: "/login" });
+    }
+  },
   component: NotificationsPage,
 });
 
