@@ -8,6 +8,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useState } from "react";
 
 export const Route = createFileRoute("/notifications")({
   beforeLoad: () => {
@@ -18,50 +19,56 @@ export const Route = createFileRoute("/notifications")({
   component: NotificationsPage,
 });
 
+const INITIAL_NOTIFICATIONS = [
+  {
+    id: 1,
+    title: "Action Required: Missing Document",
+    message:
+      "Your enrollment certificate is missing for the National Scholarship application. Please upload it to continue.",
+    type: "critical",
+    time: "12 min ago",
+    actionLabel: "Upload Document",
+    actionLink: "/documents",
+    unread: true,
+  },
+  {
+    id: 2,
+    title: "Document Expiring Soon",
+    message: "Your Income Certificate expires in 15 days. Please prepare a new one.",
+    type: "warning",
+    time: "2 hours ago",
+    actionLabel: "View Details",
+    actionLink: "/documents",
+    unread: true,
+  },
+  {
+    id: 3,
+    title: "Application Status Update",
+    message: "Your application (SAH-2026-004281) moved to department review.",
+    type: "update",
+    time: "Yesterday",
+    actionLabel: "Track Status",
+    actionLink: "/applications/SAH-2026-004281",
+    unread: false,
+  },
+  {
+    id: 4,
+    title: "Document Verified",
+    message: "Your PAN Card was successfully verified by Sahayak AI.",
+    type: "success",
+    time: "Yesterday",
+    actionLabel: "View Document",
+    actionLink: "/documents",
+    unread: false,
+  },
+];
+
 function NotificationsPage() {
-  const notifications = [
-    {
-      id: 1,
-      title: "Action Required: Missing Document",
-      message:
-        "Your enrollment certificate is missing for the National Scholarship application. Please upload it to continue.",
-      type: "critical",
-      time: "12 min ago",
-      actionLabel: "Upload Document",
-      actionLink: "/documents",
-      unread: true,
-    },
-    {
-      id: 2,
-      title: "Document Expiring Soon",
-      message: "Your Income Certificate expires in 15 days. Please prepare a new one.",
-      type: "warning",
-      time: "2 hours ago",
-      actionLabel: "View Details",
-      actionLink: "/documents",
-      unread: true,
-    },
-    {
-      id: 3,
-      title: "Application Status Update",
-      message: "Your application (SAH-2026-004281) moved to department review.",
-      type: "update",
-      time: "Yesterday",
-      actionLabel: "Track Status",
-      actionLink: "/applications/SAH-2026-004281",
-      unread: false,
-    },
-    {
-      id: 4,
-      title: "Document Verified",
-      message: "Your PAN Card was successfully verified by Sahayak AI.",
-      type: "success",
-      time: "Yesterday",
-      actionLabel: "View Document",
-      actionLink: "/documents",
-      unread: false,
-    },
-  ];
+  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
+
+  const markAllAsRead = () => {
+    setNotifications(notifications.map((n) => ({ ...n, unread: false })));
+  };
 
   return (
     <div className="min-h-screen bg-ice-2 text-foreground flex flex-col">
@@ -98,7 +105,13 @@ function NotificationsPage() {
               Stay updated on your applications and documents.
             </p>
           </div>
-          <Button variant="outline" size="sm" className="hidden sm:inline-flex">
+          <Button
+            variant="outline"
+            size="sm"
+            className="hidden sm:inline-flex"
+            onClick={markAllAsRead}
+            disabled={notifications.every((n) => !n.unread)}
+          >
             Mark all as read
           </Button>
         </div>

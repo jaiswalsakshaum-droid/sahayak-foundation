@@ -1,6 +1,16 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
-import { User, Shield, CreditCard, Link as LinkIcon, CheckCircle2, Bot } from "lucide-react";
+import {
+  User,
+  Shield,
+  CreditCard,
+  Link as LinkIcon,
+  CheckCircle2,
+  Bot,
+  ShieldCheck,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useState } from "react";
+import { ConsentModal } from "@/components/sahayak";
 
 export const Route = createFileRoute("/profile")({
   beforeLoad: () => {
@@ -12,6 +22,8 @@ export const Route = createFileRoute("/profile")({
 });
 
 function ProfilePage() {
+  const [consentOpen, setConsentOpen] = useState(false);
+
   return (
     <div className="min-h-screen bg-ice-2 text-foreground flex flex-col">
       <header className="sticky top-0 z-30 border-b border-line bg-ice-2/90 backdrop-blur-sm">
@@ -37,11 +49,17 @@ function ProfilePage() {
       </header>
 
       <main className="flex-1 mx-auto w-full max-w-3xl px-5 py-10 space-y-8">
-        <div>
-          <h1 className="text-3xl font-display font-semibold mb-2">Citizen Profile</h1>
-          <p className="text-muted-foreground">
-            Manage your identity, ecosystem integrations, and consent preferences.
-          </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-display font-semibold mb-2">Citizen Profile</h1>
+            <p className="text-muted-foreground">
+              Manage your identity, ecosystem integrations, and consent preferences.
+            </p>
+          </div>
+          <Button variant="outline" onClick={() => setConsentOpen(true)}>
+            <ShieldCheck className="mr-2 size-4" />
+            Privacy & Consent
+          </Button>
         </div>
 
         <div className="bg-card rounded-xl border border-line p-6 shadow-sm flex items-start gap-4">
@@ -96,12 +114,24 @@ function ProfilePage() {
             />
           </div>
         </div>
+        <ConsentModal open={consentOpen} onClose={() => setConsentOpen(false)} />
       </main>
     </div>
   );
 }
 
-function IntegrationRow({ name, status, desc, icon: Icon, active = false }: any) {
+function IntegrationRow({ name, status, desc, icon: Icon, active: initialActive = false }: any) {
+  const [active, setActive] = useState(initialActive);
+  const [connecting, setConnecting] = useState(false);
+
+  const handleConnect = () => {
+    setConnecting(true);
+    setTimeout(() => {
+      setConnecting(false);
+      setActive(true);
+    }, 1000);
+  };
+
   return (
     <div className="flex items-center justify-between p-4 rounded-lg border border-line bg-ice-2">
       <div className="flex items-center gap-4">
@@ -118,11 +148,17 @@ function IntegrationRow({ name, status, desc, icon: Icon, active = false }: any)
       <div>
         {active ? (
           <span className="inline-flex items-center gap-1 text-xs font-medium text-sage bg-sage/10 px-2.5 py-1 rounded-full border border-sage/20">
-            <CheckCircle2 className="size-3.5" /> {status}
+            <CheckCircle2 className="size-3.5" /> Connected
           </span>
         ) : (
-          <Button variant="outline" size="sm" className="h-7 text-xs">
-            Connect
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={handleConnect}
+            disabled={connecting}
+          >
+            {connecting ? "Connecting..." : "Connect"}
           </Button>
         )}
       </div>

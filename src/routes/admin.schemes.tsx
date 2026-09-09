@@ -1,5 +1,6 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 import { useState } from "react";
+import { toast } from "sonner";
 import {
   Search,
   Filter,
@@ -84,7 +85,9 @@ function AdminSchemesPage() {
               Manage the structured government schemes dataset used by Sahayak.
             </p>
           </div>
-          <Button>Add Scheme</Button>
+          <Button onClick={() => toast("Scheme addition is disabled in demo mode.")}>
+            Add Scheme
+          </Button>
         </div>
 
         <div className="bg-card rounded-xl border border-line shadow-sm overflow-hidden">

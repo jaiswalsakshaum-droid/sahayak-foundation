@@ -1,8 +1,9 @@
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowRight, Check } from "lucide-react";
+import { ArrowRight, Check, Loader2, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { useState } from "react";
 
 export const Route = createFileRoute("/signup")({
   head: () => ({
@@ -18,12 +19,23 @@ export const Route = createFileRoute("/signup")({
 });
 
 function SignupPage() {
+  const [name, setName] = useState("");
+  const [mobile, setMobile] = useState("");
+  const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
   const navigate = useNavigate();
 
   const handleSignup = (e: React.FormEvent) => {
     e.preventDefault();
-    localStorage.setItem("sahayak_auth", "true");
-    navigate({ to: "/dashboard" });
+    setIsLoading(true);
+
+    setTimeout(() => {
+      setIsLoading(false);
+      setIsSuccess(true);
+      localStorage.setItem("sahayak_auth", "true");
+      setTimeout(() => navigate({ to: "/dashboard" }), 800);
+    }, 1000);
   };
 
   return (
@@ -56,7 +68,8 @@ function SignupPage() {
               ))}
             </ul>
           </div>
-          <Card className="border-line bg-card shadow-sm">
+          <Card className="border-line bg-card shadow-sm relative overflow-hidden">
+            {isSuccess && <div className="absolute top-0 left-0 w-full h-1 bg-sage" />}
             <CardHeader>
               <CardTitle className="font-display text-2xl">Create your account</CardTitle>
               <p className="text-sm text-muted-foreground">
@@ -67,19 +80,53 @@ function SignupPage() {
               <form className="space-y-4" onSubmit={handleSignup}>
                 <label className="block text-sm font-medium">
                   Full name
-                  <Input className="mt-2 bg-card" placeholder="Rahul Sharma" />
+                  <Input
+                    className="mt-2 bg-card"
+                    placeholder="Rahul Sharma"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    disabled={isLoading || isSuccess}
+                  />
                 </label>
                 <label className="block text-sm font-medium">
                   Mobile number
-                  <Input className="mt-2 bg-card" placeholder="+91 98765 43210" />
+                  <Input
+                    className="mt-2 bg-card"
+                    placeholder="+91 98765 43210"
+                    value={mobile}
+                    onChange={(e) => setMobile(e.target.value)}
+                    disabled={isLoading || isSuccess}
+                  />
                 </label>
                 <label className="block text-sm font-medium">
                   Password
-                  <Input className="mt-2 bg-card" type="password" placeholder="••••••••" />
+                  <Input
+                    className="mt-2 bg-card"
+                    type="password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    disabled={isLoading || isSuccess}
+                  />
                 </label>
-                <Button type="submit" className="w-full">
-                  Create account <ArrowRight className="ml-2 size-4" />
-                </Button>
+                {isSuccess ? (
+                  <Button
+                    type="button"
+                    className="w-full bg-sage hover:bg-sage text-white cursor-default"
+                  >
+                    <CheckCircle2 className="mr-2 size-4" /> Account created
+                  </Button>
+                ) : (
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={isLoading || !name || !mobile || !password}
+                  >
+                    {isLoading ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+                    {isLoading ? "Creating account..." : "Create account"}
+                    {!isLoading && <ArrowRight className="ml-2 size-4" />}
+                  </Button>
+                )}
               </form>
               <p className="mt-5 text-center text-sm text-muted-foreground">
                 Already have an account?{" "}

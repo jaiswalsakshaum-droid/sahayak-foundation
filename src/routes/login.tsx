@@ -1,5 +1,5 @@
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowRight, LockKeyhole, AlertCircle } from "lucide-react";
+import { ArrowRight, LockKeyhole, AlertCircle, Loader2, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -22,16 +22,25 @@ function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
   const navigate = useNavigate();
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (email === "4321" && password === "1234") {
-      localStorage.setItem("sahayak_auth", "true");
-      navigate({ to: "/dashboard" });
-    } else {
-      setError("Invalid credentials. Try 4321 / 1234");
-    }
+    setError("");
+    setIsLoading(true);
+
+    setTimeout(() => {
+      setIsLoading(false);
+      if (email === "4321" && password === "1234") {
+        setIsSuccess(true);
+        localStorage.setItem("sahayak_auth", "true");
+        setTimeout(() => navigate({ to: "/dashboard" }), 800);
+      } else {
+        setError("Invalid credentials. Try 4321 / 1234");
+      }
+    }, 1000);
   };
 
   return (
@@ -39,7 +48,8 @@ function LoginPage() {
       title="Welcome back"
       description="Continue your journey from eligibility to action."
     >
-      <Card className="border-line bg-card shadow-sm">
+      <Card className="border-line bg-card shadow-sm relative overflow-hidden">
+        {isSuccess && <div className="absolute top-0 left-0 w-full h-1 bg-sage" />}
         <CardHeader>
           <div className="grid size-10 place-items-center rounded-lg bg-brand/10 text-brand">
             <LockKeyhole className="size-5" />
@@ -56,6 +66,7 @@ function LoginPage() {
                 placeholder="4321"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                disabled={isLoading || isSuccess}
               />
             </label>
             <label className="block text-sm font-medium">
@@ -66,6 +77,7 @@ function LoginPage() {
                 placeholder="1234"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                disabled={isLoading || isSuccess}
               />
             </label>
 
@@ -76,9 +88,20 @@ function LoginPage() {
               </div>
             )}
 
-            <Button type="submit" className="w-full">
-              Sign in <ArrowRight className="ml-2 size-4" />
-            </Button>
+            {isSuccess ? (
+              <Button
+                type="button"
+                className="w-full bg-sage hover:bg-sage text-white cursor-default"
+              >
+                <CheckCircle2 className="mr-2 size-4" /> Success
+              </Button>
+            ) : (
+              <Button type="submit" className="w-full" disabled={isLoading || !email || !password}>
+                {isLoading ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+                {isLoading ? "Signing in..." : "Sign in"}
+                {!isLoading && <ArrowRight className="ml-2 size-4" />}
+              </Button>
+            )}
           </form>
 
           <p className="mt-5 text-center text-sm text-muted-foreground">

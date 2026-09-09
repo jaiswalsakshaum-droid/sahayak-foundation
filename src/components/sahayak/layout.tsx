@@ -1,4 +1,4 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
 import {
   Bell,
   ChevronDown,
@@ -15,6 +15,7 @@ import {
   Sparkles,
   UserRound,
   X,
+  LogOut,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
@@ -102,6 +103,13 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
 export function AppShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [consentOpen, setConsentOpen] = useState(false);
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    localStorage.removeItem("sahayak_auth");
+    navigate({ to: "/login" });
+  };
+
   return (
     <div className="min-h-screen bg-ice-2 text-foreground">
       <header className="sticky top-0 z-30 border-b border-line bg-ice-2/90 backdrop-blur-sm">
@@ -181,6 +189,14 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <ShieldCheck className="size-4" />
                 Privacy & Consent
               </Button>
+              <Button
+                variant="ghost"
+                className="w-full justify-start gap-3 px-3 text-sm font-medium text-muted-foreground"
+                onClick={handleLogout}
+              >
+                <LogOut className="size-4" />
+                Logout
+              </Button>
               <div className="mt-2 flex items-center gap-3 px-3 text-xs text-muted-foreground">
                 <Globe2 className="size-4" />
                 English <span className="text-line">·</span> हिंदी
@@ -235,6 +251,14 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 <ShieldCheck className="size-4" />
                 Privacy & Consent
+              </Button>
+              <Button
+                variant="ghost"
+                className="mt-1 w-full justify-start gap-3 px-3 text-sm font-medium text-muted-foreground"
+                onClick={handleLogout}
+              >
+                <LogOut className="size-4" />
+                Logout
               </Button>
             </div>
           </aside>
