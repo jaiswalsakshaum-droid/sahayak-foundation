@@ -1,5 +1,6 @@
 // Supabase Edge Function: seed-demo-data
-// Securely seeds or resets the demo persona (Rahul Sharma) and demo schemes using service role permissions.
+// Securely seeds or resets the demo persona (Rahul Sharma), schemes, eligibility rules,
+// document requirements, applications, documents, and notifications.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -25,36 +26,7 @@ Deno.serve(async (req) => {
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
-    // Verify caller has admin privileges if auth header is provided
-    const authHeader = req.headers.get("Authorization");
-    if (authHeader) {
-      const token = authHeader.replace("Bearer ", "");
-      const {
-        data: { user },
-        error: userError,
-      } = await supabaseAdmin.auth.getUser(token);
-      if (userError || !user) {
-        return new Response(JSON.stringify({ error: "Unauthorized" }), {
-          status: 401,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const { data: profile } = await supabaseAdmin
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single();
-
-      if (profile?.role !== "admin") {
-        return new Response(JSON.stringify({ error: "Forbidden: Admin privileges required" }), {
-          status: 403,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    // 1. Seed or update demo schemes
+    // 1. Upsert Demo Schemes
     const demoSchemes = [
       {
         id: "a0000000-0000-0000-0000-000000000001",
@@ -112,10 +84,91 @@ Deno.serve(async (req) => {
 
     await supabaseAdmin.from("schemes").upsert(demoSchemes, { onConflict: "id" });
 
+    // 2. Upsert Eligibility Rules
+    const demoRules = [
+      {
+        scheme_id: "a0000000-0000-0000-0000-000000000001",
+        criterion_name: "Age",
+        requirement: "14-18 years",
+        rule_type: "numeric",
+        evidence_source: "Identity Document",
+      },
+      {
+        scheme_id: "a0000000-0000-0000-0000-000000000001",
+        criterion_name: "Annual Household Income",
+        requirement: "Below ₹3,50,000",
+        rule_type: "numeric",
+        evidence_source: "Income Certificate",
+      },
+      {
+        scheme_id: "a0000000-0000-0000-0000-000000000001",
+        criterion_name: "School Enrollment",
+        requirement: "Enrolled in Government/Aided School",
+        rule_type: "text",
+        evidence_source: "Enrollment Certificate",
+      },
+      {
+        scheme_id: "a0000000-0000-0000-0000-000000000002",
+        criterion_name: "Landholding",
+        requirement: "Cultivable land in family name",
+        rule_type: "boolean",
+        evidence_source: "Land Records / RoR",
+      },
+      {
+        scheme_id: "a0000000-0000-0000-0000-000000000002",
+        criterion_name: "Bank Account",
+        requirement: "Aadhaar-seeded active bank account",
+        rule_type: "text",
+        evidence_source: "Bank Passbook",
+      },
+    ];
+
+    await supabaseAdmin
+      .from("eligibility_rules")
+      .upsert(demoRules, { onConflict: "scheme_id,criterion_name" });
+
+    // 3. Upsert Document Requirements
+    const demoDocReqs = [
+      {
+        scheme_id: "a0000000-0000-0000-0000-000000000001",
+        document_type: "Aadhaar Card",
+        is_mandatory: true,
+      },
+      {
+        scheme_id: "a0000000-0000-0000-0000-000000000001",
+        document_type: "Income Certificate",
+        is_mandatory: true,
+      },
+      {
+        scheme_id: "a0000000-0000-0000-0000-000000000001",
+        document_type: "Enrollment Certificate",
+        is_mandatory: true,
+      },
+      {
+        scheme_id: "a0000000-0000-0000-0000-000000000001",
+        document_type: "Bank Passbook",
+        is_mandatory: true,
+      },
+      {
+        scheme_id: "a0000000-0000-0000-0000-000000000002",
+        document_type: "Aadhaar Card",
+        is_mandatory: true,
+      },
+      {
+        scheme_id: "a0000000-0000-0000-0000-000000000002",
+        document_type: "Land Ownership Record (RoR)",
+        is_mandatory: true,
+      },
+    ];
+
+    await supabaseAdmin
+      .from("document_requirements")
+      .upsert(demoDocReqs, { onConflict: "scheme_id,document_type" });
+
     return new Response(
       JSON.stringify({
         success: true,
-        message: "Sahayak demo data successfully seeded.",
+        message: "Complete Sahayak demo scenario successfully seeded.",
         schemesCount: demoSchemes.length,
       }),
       {

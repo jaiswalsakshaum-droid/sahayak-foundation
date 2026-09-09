@@ -121,20 +121,62 @@ const AGENTS_DATA = [
   },
 ];
 
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { getRecentAgentEvents } from "@/lib/admin-services";
+
 function AdminAgentsPage() {
   const [selectedAgent, setSelectedAgent] = useState<(typeof AGENTS_DATA)[0] | null>(null);
   const [simMode, setSimMode] = useState(false);
   const [activeNode, setActiveNode] = useState(0);
   const [events, setEvents] = useState<typeof MOCK_AGENT_EVENTS>([]);
 
+  // Load initial events and subscribe to live agent_events across all runs
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadEvents() {
+      const initial = await getRecentAgentEvents();
+      if (isMounted) setEvents(initial);
+    }
+    loadEvents();
+
+    if (isSupabaseConfigured) {
+      const channel = supabase
+        .channel("admin_agent_events")
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "agent_events" },
+          (payload) => {
+            const row = payload.new as any;
+            const newEv = {
+              id: row.id,
+              timestamp: new Date(row.created_at || Date.now()).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              }),
+              agent: row.agent_name,
+              action: row.action,
+            };
+            setEvents((prev) => [newEv, ...prev]);
+          },
+        )
+        .subscribe();
+
+      return () => {
+        isMounted = false;
+        supabase.removeChannel(channel);
+      };
+    }
+  }, []);
+
   useEffect(() => {
     if (!simMode) {
       setActiveNode(0);
-      setEvents([]);
       return;
     }
 
-    // Simulate events stream
+    // Simulate events stream on manual button click
     let step = 0;
     const interval = setInterval(() => {
       if (step < MOCK_AGENT_EVENTS.length) {

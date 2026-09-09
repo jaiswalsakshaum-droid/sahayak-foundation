@@ -1,0 +1,185 @@
+# Sahayak — Phase 2 Audit + Phase 3 Implementation Plan (Document Intelligence & Real Eligibility)
+
+**Team DietCode · Build with Bharat 2.0**
+
+---
+
+## Part 0 — Phase 2 audit: what's solid, what's urgent, what's missing evidence
+
+Before anything else: **your Phase 2 log only shows code for 9 of the 16 artifacts it claims to have changed.** Items 10–16 — the actual fixes to `auth.ts`, `services.ts`, `seed-demo-data`, the schema migration, `assistant.tsx`, `admin.agents.tsx`, and the `analytics.tsx` guard — are listed in the table of contents as "modified" but no diff or code is shown for any of them. I audited what I could see (the backend, the Edge Function, the Realtime hook) in full depth below. But I want to be upfront: **I cannot confirm the four Part-0 fixes from the previous round actually landed correctly**, because there's no evidence in this log. Please get the actual diffs for items 10–16 before assuming they're done — this is worth 10 minutes to confirm properly rather than finding out live.
+
+Of what I *could* verify, here's the honest breakdown, worst first.
+
+### 🔴 Fix these before you touch anything else — not "should," literally can't safely proceed otherwise
+
+**1. There's a real-looking Supabase service role key committed to `backend/.env.example`.**
+```
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key-here
+```
+A `.env.example` file exists specifically so it can be safely committed to git as a template with placeholder values. This one has what appears to be an actual project URL and an actual service-role key (the `sb_secret_` prefix matches Supabase's current key format). **A service-role key bypasses every RLS policy you've built — all of it.** If this is real, treat it as compromised the moment it left your machine (including having been pasted into this chat). **Go rotate it in the Supabase dashboard right now** (Project Settings → API → regenerate service role key), regardless of how confident you are that it's fake or already replaced elsewhere. Then make sure the real `.env` is in `.gitignore` and `.env.example` only ever contains placeholder text like `your-service-role-key-here`. This is a five-minute fix and it's the single highest-priority item in this entire document.
+
+**2. The backend will not boot on Render as configured.**
+`backend/app.py` does `from backend.agent_graph import ...`, and `backend/agent_graph.py` does `from backend.state import SahayakState` — both treating `backend` as an importable Python *package* from one level above it. But your `render.yaml` runs `uvicorn app:app` (not `uvicorn backend.app:app`), and your `Dockerfile` sets `WORKDIR /app`, copies the `backend/` folder's contents directly into it, and runs `uvicorn app:app` from there too. In both cases, the process's working directory *is* the folder these files live in — there's no `backend/` package reachable from that location. This will fail immediately on startup with `ModuleNotFoundError: No module named 'backend'`. **Fix:** either change the imports to relative/flat (`from agent_graph import ...`, `from state import SahayakState`) to match how the app is actually being run, or run it as `uvicorn backend.app:app` from the repo root and set Render's root directory accordingly — pick one and make it consistent. While you're in there: the Dockerfile and `render.yaml` currently specify two different deployment mechanisms (`env: python` in `render.yaml` tells Render to ignore the Dockerfile and use its native Python buildpack instead) — decide on one and delete the other, so there's no ambiguity about which actually runs.
+
+**3. The internal-secret check is inverted — `/run` is currently unauthenticated on the public internet.**
+```python
+if INTERNAL_SECRET and x_sahayak_internal_secret:
+    if x_sahayak_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=403, ...)
+```
+Read this closely: if a request arrives with **no** `X-Sahayak-Internal-Secret` header at all, `x_sahayak_internal_secret` is `None`, the outer `if` is `False`, and the whole check is skipped — the request is allowed through with zero authentication. Anyone who finds your Render URL (these are guessable/discoverable, e.g. `sahayak-ai-backend.onrender.com`) can call `POST /run` with any `citizen_id` they want, trigger orchestration runs, burn your Groq quota, and write `agent_events`/`applications` rows attributed to a citizen they don't control — no secret required. **Fix:** require the header unconditionally — `if x_sahayak_internal_secret != INTERNAL_SECRET: raise HTTPException(403)`, full stop, no "if present" gate. Also drop the hardcoded fallback (`os.getenv("INTERNAL_SHARED_SECRET", "sahayak-internal-secret-2026")`) — a secret with a public, guessable default value defeats the purpose the moment the real env var isn't set; fail loudly on startup instead if it's missing.
+
+**4. The Edge Function silently impersonates the demo citizen on any auth failure.**
+```ts
+let citizenId = "d0000000-0000-0000-0000-000000000001"; // Rahul Sharma
+if (authHeader) {
+  const { data: { user } } = await supabaseAdmin.auth.getUser(token);
+  if (user?.id) citizenId = user.id;
+}
+```
+If there's no `Authorization` header, or the token is invalid, this doesn't reject the request — it quietly proceeds *as the demo citizen*. Combined with bug #3 above, someone hitting either URL with no credentials at all can currently generate real activity under Rahul Sharma's account. This also contradicts what the Phase 2 plan actually asked for ("verify with `supabase.auth.getUser(token)` → reject if invalid"). **Fix:** return `401` if there's no valid session — never fall through to a real citizen ID as a default.
+
+### 🟠 High priority — this is where the "real AI" claim is still fake
+
+This is the important one, and it's a structural finding, not a nitpick: **`eligibility_agent_node` and `document_agent_node` never call Groq at all.** Looking at the actual code:
+
+```python
+if "enrollment" in criterion_name.lower():
+    status = "missing"
+    ...
+elif "income" in criterion_name.lower():
+    citizen_val = f"₹{income:,}"   # just echoes the value — never compares it to the rule
+```
+and
+```python
+missing_docs = ["Enrollment Certificate"]   # hardcoded, every single run, unconditionally
+```
+
+**This means eligibility evaluation — the exact thing your pitch calls "evidence-backed" and lists as your top differentiator over myScheme — is still keyword-matching a hardcoded string, not reasoning over real rules.** It doesn't parse the requirement text (`"Below ₹3,50,000"`) and compare it to the profile's actual income. It doesn't check whether a landholding rule or a boolean rule is satisfied at all — it just rubber-stamps anything that doesn't contain the word "enrollment" as `verified`, with no evidence behind that judgment. Document Agent has the identical problem: it never queries the real `document_requirements` or `documents` tables (despite that being explicitly in the Phase 2 plan's spec for this node), and never even reads `eligibility_result` from the graph state — it just always returns the same missing document, regardless of scheme or citizen.
+
+Practically, this means: for any scheme *other* than the demo scholarship (say a citizen asks about PM-KISAN), Eligibility Agent will currently rubber-stamp landholding and bank-account criteria as "verified" with zero actual evidence, since neither contains "enrollment." That's not a safe default for a pitch about trustworthy, evidence-backed government benefit decisions.
+
+**This is the centerpiece of Phase 3 below** — not a side fix, the main event. Document intelligence and real eligibility evaluation are tightly coupled (eligibility needs real document state to reason over), so it makes sense to solve them together rather than patch eligibility now and redo it once documents are real.
+
+### 🟡 Medium — worth fixing this pass
+
+**5. `.maybeSingle()` is (likely) the wrong method name for the Python client, and the failure is silently swallowed.** `supabase-py`/postgrest-py uses snake_case — `.maybe_single()`, not `.maybeSingle()`. If this throws `AttributeError`, it's caught by the surrounding `try/except`, which just logs a warning and falls back to the hardcoded Rahul Sharma profile — meaning **every run, for every citizen, may currently be using the demo profile's data regardless of who's actually logged in**, and this would be very easy to miss in casual testing since nothing visibly breaks. Fix the method name, and change that except block to `logger.error` (not `warning`) so a regression like this is loud in your logs instead of silent.
+
+**6. The Pydantic schemas in `state.py` (`NeedIntent`, `SchemeRankingResult`, `EligibilityResult`, etc.) are defined but never used.** `call_groq_json_with_retry` uses raw `response_format={"type": "json_object"}` and does `json.loads()` straight into an untyped dict — no validation against the schemas you wrote. This matters because Groq's JSON mode guarantees syntactically valid JSON, not that it matches your expected shape; a response missing a field or with the wrong type will currently sail straight through into `agent_events.details` and can break the frontend renderer expecting a specific structure. Actually validate the parsed dict against the corresponding Pydantic model before returning it from each node, and fall back to the existing hardcoded default on a `ValidationError`, not just on a request exception.
+
+**7. `use-agent-run.ts` has a silent-failure path with no visible error state.** `startRun()` sets a fake local `run-${Date.now()}` ID immediately, then only replaces it with the real `run_id` if the Edge Function call succeeds — if that call fails (cold Render instance, network blip, misconfigured URL), the hook stays subscribed to a channel that will never receive anything, the UI sits in `"PROCESSING"` forever, and the `catch` block only `console.warn`s, with no user-facing error or retry. Add a timeout (e.g. no event within 8–10 seconds → show a retry/error state) — for a stage demo especially, silent infinite-spinner failure is worse than an honest error message.
+
+**8. The hook infers run status by string-matching agent names on individual events**, rather than reading the authoritative `status` column on `agent_runs` (which Render itself updates). For example, any `document_agent` event immediately flips the UI to `"ACTION_REQUIRED"`, even mid-loop, before `eligibility_agent` has had a chance to re-evaluate. Once Phase 3 makes the eligibility↔document loop meaningful (see below), this mismatch will produce confusing UI state. Subscribe to `agent_runs` row changes for `status`, and use `agent_events` only for the message feed.
+
+### 🟢 Minor / polish
+- CORS is set to `allow_origins=["*"]` with `allow_credentials=True` — this combination is actually invalid per spec (browsers won't honor credentialed wildcard-origin requests), and it's moot anyway since this API is only ever called server-to-server by the Edge Function, never directly by a browser. Simplify to no CORS middleware, or `allow_credentials=False`.
+- `"429" in str(e)` for detecting rate limits is fragile — the `groq` Python SDK exposes typed exceptions; catch the specific rate-limit exception type / check `e.status_code == 429` instead of string-matching the error message.
+- Backoff uses a fixed `attempt * 2 + 1` schedule rather than reading Groq's `retry-after` header, as the Phase 2 plan asked — fine for a hackathon, but if you have time, honoring the real header value is more correct.
+- `application_agent_node`'s `.upsert(..., on_conflict="citizen_id,scheme_id")` assumes a `unique (citizen_id, scheme_id)` constraint exists on `applications` — this was a Phase 1 fix item I can't verify landed (see the top of this section). If it's missing, this call will error at runtime with a Postgres "no unique or exclusion constraint matching ON CONFLICT" error. Confirm this constraint actually exists before relying on this code path.
+
+---
+
+## Part 1 — Phase 3 goals & definition of done
+
+Phase 3 has two halves that depend on each other: **real document intelligence** (actual file upload + extraction, not a metadata stub) and **real eligibility evaluation** (rules actually compared against real data, not string-matching). Bundling them is intentional — Eligibility Agent can't reason honestly about "is this document sufficient" without Document Agent producing real extracted data first.
+
+**Done means:**
+- A citizen uploads an actual file in `/documents`; it lands in Supabase Storage; a real extraction step (Groq vision model, or OCR + LLM structuring) reads it and writes real `extracted_fields`/`confidence`/`status` to the `documents` row — no more hardcoded "Rahul Sharma, DOB 15-08-2004" regardless of what was uploaded.
+- `document_agent_node` computes missing/verified documents by actually querying `document_requirements` for the scheme and `documents` already on file for the citizen — not a fixed string.
+- `eligibility_agent_node` actually evaluates each rule: numeric rules get a deterministic comparison (parse the requirement, compare to the real profile/document value) as a safety net, with an LLM layer used to interpret messier `text`/`boolean`/`enum` requirements and produce the citizen-facing explanation — hybrid, not pure LLM guessing and not pure hardcoded string matching.
+- The eligibility ↔ document loop becomes meaningful: upload the missing document, re-run, and the citizen can actually reach `application_agent` and a completed run — today this path is structurally present but can never actually succeed.
+- `/admin/agents` shows a genuinely live multi-citizen feed, and the frontend trusts `agent_runs.status` as ground truth (fixing item 8 above).
+- All five 🔴/🟠 items from Part 0 are fixed and re-verified before Phase 3 work is considered complete — they're prerequisites, not parallel work.
+
+---
+
+## Part 2 — Document intelligence pipeline
+
+### 2.1 Upload flow (`/documents` page)
+1. Citizen selects a file → client uploads directly to Supabase Storage at `documents/{citizen_id}/{timestamp}-{filename}` (this finally makes real use of the bucket/RLS policies from Phase 1 that were sitting unused).
+2. Client inserts a `documents` row: `status = 'pending'`, `file_path` set, `extracted_fields = null`.
+3. Client calls a new Edge Function, `extract-document`, passing the `document_id` — this is the trigger for real extraction, analogous to `orchestrate-agent-run` but for a single-shot task rather than a multi-agent graph.
+
+### 2.2 Extraction: where it runs and with what
+Route this through **Render**, not a Supabase Edge Function directly — vision-model calls plus a Storage download can run close to Edge Function time limits, and Render already holds your Groq client and service-role Supabase access. Add one endpoint:
+
+- `POST /extract-document` — body `{ document_id }`, protected by the *now-fixed* internal secret. Render: downloads the file from Storage (service-role client, no signed-URL roundtrip needed), base64-encodes it, and calls a Groq vision-capable model (`qwen/qwen3.6-27b`, marked preview — acceptable for a hackathon demo, not something to depend on for anything you'd call production) with a structured-output prompt asking for the document type, key fields (name, DOB, ID numbers, issue date), and a confidence estimate. Writes the result back to the `documents` row: `status = 'verified'` or `'needs_review'` depending on confidence, `extracted_fields`, `confidence`.
+- **Fallback path, worth building even if you don't demo it:** if the vision model call fails or its confidence is low, fall back to classic OCR (`pytesseract` on a rasterized page) + a text-only Groq call (`openai/gpt-oss-20b`) to structure the raw OCR text into the same field shape. This is genuinely useful insurance — vision-preview models are the first thing to have an off day, and a total document-pipeline failure live is worse than a slightly-lower-confidence OCR fallback.
+
+### 2.3 Making `document_agent_node` real
+```python
+def document_agent_node(state):
+    run_id, citizen_id, scheme_id = state["run_id"], state["citizen_id"], state["selected_scheme_id"]
+    write_agent_event(run_id, "Document Agent", "Checking required documents against citizen records...")
+
+    required = supabase_admin.table("document_requirements").select("*").eq("scheme_id", scheme_id).execute().data
+    on_file = supabase_admin.table("documents").select("*").eq("citizen_id", citizen_id).eq("status", "verified").execute().data
+    on_file_types = {d["document_type"] for d in on_file}
+
+    missing = [r["document_type"] for r in required if r["is_mandatory"] and r["document_type"] not in on_file_types]
+    verified = [r["document_type"] for r in required if r["document_type"] in on_file_types]
+    ...
+```
+No LLM call strictly needed here — this is a real data comparison, which is honestly a better fit than an LLM guess for a task that's fundamentally set arithmetic. If you want a Groq call in this node anyway (for narrative consistency with the rest of the graph, and because it can also write a nicer citizen-facing message), use it only to *phrase* the result, not to *compute* it — keep the actual missing/verified determination deterministic.
+
+### 2.4 Making `eligibility_agent_node` real (hybrid deterministic + LLM)
+```python
+def evaluate_rule(rule, citizen_profile, verified_documents):
+    rule_type = rule["rule_type"]
+    if rule_type == "numeric" and rule["criterion_name"].lower() in KNOWN_NUMERIC_PROFILE_FIELDS:
+        # deterministic: parse requirement string, compare to real profile value
+        return deterministic_numeric_check(rule, citizen_profile)
+    # boolean / enum / text, or numeric fields we don't have a clean profile mapping for:
+    # ask the LLM to judge, given the rule + whatever evidence (profile fields, verified document
+    # types + their extracted_fields) is actually available — and require it to cite which piece
+    # of evidence it used
+    return llm_judge_rule(rule, citizen_profile, verified_documents)
+```
+`deterministic_numeric_check` needs a small parser for common government requirement phrasings (`"Below ₹3,50,000"`, `"18-25 years"`, ranges like `"EWS: <= ₹3L, LIG: <= ₹6L"`) — this doesn't need to be exhaustive, just cover the ~10 rules in your seeded demo schemes; anything it can't confidently parse falls through to the LLM path rather than guessing. This hybrid is worth the extra hour of work: a judge who asks "how do you know the AI didn't just make that up" gets a genuinely good answer — numeric thresholds are checked in code, not by the model, and only qualitative criteria go through the model, with the requirement text and evidence value both visible in the `audit_logs` row either way.
+
+### 2.5 Closing the loop
+Once both nodes are real, the existing conditional-edge structure (`eligibility_agent → document_agent → eligibility_agent`, capped at one re-entry) finally does something meaningful: a citizen who uploads the missing enrollment certificate mid-flow can have `document_agent` see it, `eligibility_agent` re-evaluate with the new evidence, and actually reach `application_agent` — the success path that's currently unreachable for your primary demo scheme becomes reachable for real.
+
+---
+
+## Part 3 — Live orchestration polish
+
+- Fix the `useAgentRun` hook to subscribe to `agent_runs` (for `status`) *and* `agent_events` (for the message feed) as two separate concerns, rather than inferring status from event agent-name string matching (Part 0, item 8).
+- Add the missing-response timeout (Part 0, item 7) — 8–10 seconds with no event after `startRun()` succeeds should surface a visible "still working / something went wrong" state, not silence.
+- `/admin/agents`: subscribe to `agent_events` without a `run_id` filter (admin's RLS already grants full visibility), grouped by `run_id` in the UI so multiple citizens' runs are visually distinct in the live feed — this is your best "we built real infrastructure" demo beat, worth the extra hour to make it visually clean.
+- Re-verify Part 0 items 3 and 4 (the auth bugs) with an actual test: call `/run` directly with `curl`, no headers at all, and confirm it now correctly returns 403/401 rather than silently accepting the request.
+
+---
+
+## Part 4 — Task order
+
+1. Fix the four 🔴 items (rotate the key, fix the import/deploy path, fix the internal-secret check, fix the Edge Function auth fallback) — nothing else in Phase 3 should be built or tested until these are done, since you'd otherwise be testing against a backend that either won't boot or isn't actually authenticated.
+2. Get and review the actual diffs for Part 0 items 10–16 from the Phase 2 log — confirm they're real and correct, not just claimed.
+3. Fix items 5 and 6 (the `.maybeSingle()` typo and the unused Pydantic validation) — small, fast, and they affect correctness of everything built after.
+4. Build the Storage upload flow in `/documents` (2.1).
+5. Build `/extract-document` on Render + the vision-model call + OCR fallback (2.2).
+6. Rewrite `document_agent_node` to be data-driven (2.3).
+7. Build the hybrid deterministic/LLM `eligibility_agent_node` (2.4) — this is the biggest single chunk of work in this phase, budget accordingly.
+8. Verify the loop actually closes end-to-end: start a run, hit the missing-document branch, upload the real document, re-run, reach `application_agent` (2.5).
+9. Frontend polish: fix the `useAgentRun` status source and add the timeout (Part 3).
+10. Full rehearsal, including the failure paths (kill Render mid-run, upload a low-quality/blurry image and confirm graceful low-confidence handling rather than a crash).
+
+## Part 5 — Acceptance checklist
+- [ ] `curl -X POST https://<render-url>/run` with no headers returns 401/403, not 202
+- [ ] The `.env.example` service-role key has been rotated in the Supabase dashboard and is no longer valid
+- [ ] Render actually boots and `/health` responds after a fresh deploy
+- [ ] Two different logged-in citizens each see their own real profile data in a run, not both seeing "Rahul Sharma"
+- [ ] Uploading an actual Aadhaar-style test image produces `extracted_fields` that reflect what's *actually in the image*, not a fixed constant
+- [ ] A scheme with no "enrollment"-named rule (e.g. PM-KISAN) gets criteria evaluated against its *own* rules, not rubber-stamped
+- [ ] Uploading the missing document mid-demo and re-running actually reaches `application_agent` and a `COMPLETED` run — the success path is reachable, not just structurally present
+- [ ] `/admin/agents` clearly shows two concurrent citizens' runs without the feed becoming an unreadable interleaved mess
+
+## Part 6 — Explicit non-goals for Phase 3
+- No fine-tuning or custom OCR model training — Groq vision + Tesseract fallback is enough for a hackathon.
+- No handling of documents in languages other than English/Hindi Devanagari for OCR — scope to what your demo documents actually use.
+- No multi-document-per-requirement handling (e.g., citizen uploads three candidate income certificates) — one file per requirement type is enough for now.
+
+---
+
+This closes the loop on the core "agentic AI workforce" claim — after Phase 3, every agent in the graph is doing something real, not just narrating a hardcoded outcome. Phase 4 (pitch hardening: real analytics, deployment polish, rehearsal) is comparatively light after this; happy to write that one out whenever you're ready for it.

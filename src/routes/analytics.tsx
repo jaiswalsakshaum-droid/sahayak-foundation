@@ -16,11 +16,11 @@ import {
   Line,
 } from "recharts";
 import { Users, FileText, CheckCircle, Clock, Activity, Shield } from "lucide-react";
-import { requireAuth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
 
 export const Route = createFileRoute("/analytics")({
   beforeLoad: async () => {
-    await requireAuth();
+    await requireAdmin();
   },
   component: AnalyticsDashboard,
 });

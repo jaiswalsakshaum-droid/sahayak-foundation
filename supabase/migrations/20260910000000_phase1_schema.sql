@@ -87,7 +87,8 @@ create table if not exists public.applications (
   applicant_info jsonb default '{}'::jsonb,
   tracking_id text unique,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint uq_citizen_scheme unique (citizen_id, scheme_id)
 );
 
 create table if not exists public.application_documents (
@@ -276,7 +277,7 @@ create policy "audit_logs_via_run_or_admin" on public.audit_logs
   );
 
 create policy "audit_logs_insert_admin_or_system" on public.audit_logs
-  for insert with check (true);
+  for insert with check (public.is_admin() or (auth.jwt()->>'role' = 'service_role'));
 
 -- Consent & Notifications
 create policy "consent_citizen_or_admin" on public.consent_records

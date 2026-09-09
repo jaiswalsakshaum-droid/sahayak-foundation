@@ -340,20 +340,20 @@ export type DocumentValidationResult = {
 };
 
 /**
- * Validate document and persist in documents table
+ * Validate document and persist in documents table & Supabase Storage
  */
 export async function validateDocument(file: any): Promise<DocumentValidationResult> {
   const result: DocumentValidationResult = {
     isValid: true,
-    type: "Identity Proof",
-    name: "Aadhaar Card",
+    type: file?.type?.includes("image") ? "Identity Proof" : "Income Proof",
+    name: file?.name ? file.name.replace(/\.[^/.]+$/, "") : "Aadhaar Card",
     issueDate: "12-05-2018",
     validity: "Lifetime",
     confidence: 96,
     extractedFields: {
       Name: "Rahul Sharma",
       DOB: "15-08-2004",
-      "Aadhaar Number": "XXXX-XXXX-4321",
+      "Document ID": "XXXX-XXXX-4321",
     },
   };
 
@@ -361,17 +361,39 @@ export async function validateDocument(file: any): Promise<DocumentValidationRes
     try {
       const session = await getSession();
       if (session?.user?.id) {
+        let uploadedPath: string | null = null;
+
+        // If a real File object is provided, upload to Supabase Storage 'documents' bucket
+        if (file && (file instanceof Blob || typeof file.arrayBuffer === "function")) {
+          const fileName = `${Date.now()}_${(file.name || "document.pdf").replace(/\s+/g, "_")}`;
+          const storagePath = `${session.user.id}/${fileName}`;
+
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from("documents")
+            .upload(storagePath, file, {
+              cacheControl: "3600",
+              upsert: true,
+            });
+
+          if (!uploadError && uploadData) {
+            uploadedPath = uploadData.path;
+          } else if (uploadError) {
+            console.warn("[Sahayak Storage] Upload error:", uploadError.message);
+          }
+        }
+
         await supabase.from("documents").insert({
           citizen_id: session.user.id,
           document_type: result.type,
           file_name: file?.name || "Uploaded_Document.pdf",
+          file_path: uploadedPath,
           status: "verified",
           confidence: result.confidence,
           extracted_fields: result.extractedFields,
         });
       }
     } catch (err) {
-      console.warn("[Sahayak Services] Document insert error:", err);
+      console.warn("[Sahayak Services] Document insert/upload error:", err);
     }
   }
 
@@ -400,10 +422,12 @@ export type ApplicationDraft = {
 };
 
 /**
- * Prepare application draft
+ * Prepare application draft with duplicate prevention
  */
 export async function prepareApplication(schemeId: string): Promise<ApplicationDraft> {
-  const draftId = `SAH-2026-${Math.floor(100000 + Math.random() * 900000)}`;
+  const targetSchemeId = schemeId.startsWith("a000")
+    ? schemeId
+    : "a0000000-0000-0000-0000-000000000001";
 
   if (isSupabaseConfigured) {
     try {
@@ -413,11 +437,39 @@ export async function prepareApplication(schemeId: string): Promise<ApplicationD
         const { data: scheme } = await supabase
           .from("schemes")
           .select("name")
-          .eq("id", schemeId)
+          .eq("id", targetSchemeId)
           .single();
 
         const schemeName = scheme?.name || "National Means-cum-Merit Scholarship";
 
+        // Check if an application draft already exists for this citizen and scheme
+        const { data: existingApp } = await supabase
+          .from("applications")
+          .select("*")
+          .eq("citizen_id", session.user.id)
+          .eq("scheme_id", targetSchemeId)
+          .maybeSingle();
+
+        if (existingApp) {
+          return {
+            id: existingApp.tracking_id || existingApp.id,
+            schemeId: targetSchemeId,
+            schemeName,
+            status: existingApp.status as any,
+            applicantInfo: existingApp.applicant_info || {
+              "Full Name": { value: "Rahul Sharma", status: "verified" },
+              "Date of Birth": { value: "15-08-2004", status: "verified" },
+              "Annual Income": { value: "₹2,10,000", status: "verified" },
+            },
+            documents: [
+              { name: "Aadhaar Card", status: "verified" },
+              { name: "Income Certificate", status: "verified" },
+              { name: "Enrollment Certificate", status: "missing" },
+            ],
+          };
+        }
+
+        const draftId = `SAH-2026-${Math.floor(100000 + Math.random() * 900000)}`;
         const applicantInfo = {
           "Full Name": { value: "Rahul Sharma", status: "verified" as const },
           "Date of Birth": { value: "15-08-2004", status: "verified" as const },
@@ -426,11 +478,9 @@ export async function prepareApplication(schemeId: string): Promise<ApplicationD
           "Bank Account": { value: "XXXX-XXXX-4321", status: "needs_review" as const },
         };
 
-        await supabase.from("applications").upsert({
+        await supabase.from("applications").insert({
           citizen_id: session.user.id,
-          scheme_id: schemeId.startsWith("a000")
-            ? schemeId
-            : "a0000000-0000-0000-0000-000000000001",
+          scheme_id: targetSchemeId,
           status: "awaiting_approval",
           applicant_info: applicantInfo,
           tracking_id: draftId,
@@ -438,7 +488,7 @@ export async function prepareApplication(schemeId: string): Promise<ApplicationD
 
         return {
           id: draftId,
-          schemeId,
+          schemeId: targetSchemeId,
           schemeName,
           status: "awaiting_approval",
           applicantInfo,
@@ -545,21 +595,65 @@ export async function submitApplication(
 }
 
 /**
- * Get application status and derived timeline
+ * Get real application status and dynamically derived step timeline from DB
  */
 export async function getApplicationStatus(applicationId: string): Promise<{
   status: string;
   timeline: { step: string; status: "completed" | "current" | "pending" }[];
 }> {
+  let appStatus = "submitted";
+
+  if (isSupabaseConfigured) {
+    try {
+      const { data, error } = await supabase
+        .from("applications")
+        .select("status")
+        .or(`tracking_id.eq.${applicationId},id.eq.${applicationId}`)
+        .maybeSingle();
+
+      if (!error && data?.status) {
+        appStatus = data.status;
+      }
+    } catch (err) {
+      console.warn("[Sahayak Services] Get application status error:", err);
+    }
+  }
+
+  // Derive step timeline based on real status
+  const isDraft = appStatus === "draft";
+  const isAwaiting = appStatus === "awaiting_approval";
+  const isSubmitted = appStatus === "submitted";
+  const isReview = appStatus === "under_review";
+  const isApproved = appStatus === "approved";
+
   return {
-    status: "submitted",
+    status: appStatus,
     timeline: [
-      { step: "Application prepared", status: "completed" },
-      { step: "Citizen approved", status: "completed" },
-      { step: "Submitted", status: "completed" },
-      { step: "Under department review", status: "current" },
-      { step: "Decision", status: "pending" },
-      { step: "Benefit disbursement", status: "pending" },
+      {
+        step: "Application prepared",
+        status: "completed",
+      },
+      {
+        step: "Citizen approved",
+        status: isDraft ? "pending" : isAwaiting ? "current" : "completed",
+      },
+      {
+        step: "Submitted to government portal",
+        status: isDraft || isAwaiting ? "pending" : isSubmitted ? "completed" : "completed",
+      },
+      {
+        step: "Under department review",
+        status:
+          isDraft || isAwaiting || isSubmitted ? "pending" : isReview ? "current" : "completed",
+      },
+      {
+        step: "Benefit decision & approval",
+        status: isApproved ? "completed" : "pending",
+      },
+      {
+        step: "Direct benefit transfer (DBT)",
+        status: "pending",
+      },
     ],
   };
 }

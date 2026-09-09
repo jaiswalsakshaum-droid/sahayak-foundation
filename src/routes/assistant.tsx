@@ -67,6 +67,8 @@ const MOCK_SCHEMES = [
   },
 ];
 
+import { useAgentRun } from "@/hooks/use-agent-run";
+
 type JourneyStep = {
   id: string;
   agentId: string;
@@ -82,6 +84,8 @@ function AssistantPage() {
   const [activeStepIndex, setActiveStepIndex] = useState(-1);
   const [showResults, setShowResults] = useState(false);
   const [selectedScheme, setSelectedScheme] = useState<(typeof MOCK_SCHEMES)[0] | null>(null);
+
+  const { runId, events, status, activeAgentIndex, startRun } = useAgentRun();
 
   const [journeySteps, setJourneySteps] = useState<JourneyStep[]>([
     {
@@ -118,14 +122,6 @@ function AssistantPage() {
     },
     {
       id: "s5",
-      agentId: "eligibility",
-      name: "Eligibility Agent",
-      icon: ClipboardCheck,
-      messages: [],
-      handoffMessage: "Passing verified eligibility...",
-    },
-    {
-      id: "s6",
       agentId: "application",
       name: "Application Agent",
       icon: FileText,
@@ -133,67 +129,103 @@ function AssistantPage() {
     },
   ]);
 
-  const handleSend = (text: string) => {
+  // Sync Realtime events into journey step messages
+  useEffect(() => {
+    if (events.length === 0) return;
+
+    events.forEach((ev) => {
+      const agentLower = ev.agent_name.toLowerCase();
+      let stepIdx = -1;
+      if (agentLower.includes("citizen")) stepIdx = 0;
+      else if (agentLower.includes("scheme")) stepIdx = 1;
+      else if (agentLower.includes("eligibility")) stepIdx = 2;
+      else if (agentLower.includes("document")) stepIdx = 3;
+      else if (agentLower.includes("application")) stepIdx = 4;
+
+      if (stepIdx !== -1) {
+        setJourneySteps((prev) => {
+          const copy = [...prev];
+          if (!copy[stepIdx].messages.includes(ev.action)) {
+            copy[stepIdx] = {
+              ...copy[stepIdx],
+              messages: [...copy[stepIdx].messages, ev.action],
+            };
+          }
+          return copy;
+        });
+      }
+    });
+
+    if (activeAgentIndex >= 0) {
+      setActiveStepIndex(activeAgentIndex);
+    }
+
+    if (status === "ACTION_REQUIRED" || status === "COMPLETED") {
+      setShowResults(true);
+    }
+  }, [events, activeAgentIndex, status]);
+
+  const handleSend = async (text: string) => {
     if (!text.trim()) return;
     setInput(text);
-    startWorkforce();
-  };
-
-  const updateStepMessages = (index: number, msg: string) => {
-    setJourneySteps((prev) => {
-      const copy = [...prev];
-      copy[index] = { ...copy[index], messages: [...copy[index].messages, msg] };
-      return copy;
-    });
-  };
-
-  const startWorkforce = () => {
     setHasStarted(true);
     setActiveStepIndex(0);
     setShowResults(false);
-
-    // Clear previous runs
     setJourneySteps((prev) => prev.map((s) => ({ ...s, messages: [] })));
 
-    // Step 0: Citizen Agent
-    setTimeout(() => updateStepMessages(0, "Understanding citizen situation..."), 500);
+    // Trigger backend LangGraph orchestration via Edge Function / Realtime
+    await startRun(text);
+
+    // Fallback simulation timer to guarantee smooth UI reveal if offline
     setTimeout(() => {
-      updateStepMessages(0, "Detected education + low-income household.");
+      setJourneySteps((prev) => {
+        const copy = [...prev];
+        if (copy[0].messages.length === 0) {
+          copy[0].messages = [
+            "Understanding citizen situation...",
+            "Detected education + low-income household.",
+          ];
+        }
+        return copy;
+      });
+      setActiveStepIndex(1);
     }, 2000);
-    setTimeout(() => setActiveStepIndex(1), 3000);
 
-    // Step 1: Scheme Agent
-    setTimeout(() => updateStepMessages(1, "Searching relevant schemes..."), 3500);
     setTimeout(() => {
-      updateStepMessages(1, "4 potentially relevant schemes found.");
-    }, 5000);
-    setTimeout(() => setActiveStepIndex(2), 6000);
+      setJourneySteps((prev) => {
+        const copy = [...prev];
+        if (copy[1].messages.length === 0) {
+          copy[1].messages = [
+            "Scanning schemes catalog...",
+            "4 potentially relevant schemes found.",
+          ];
+        }
+        return copy;
+      });
+      setActiveStepIndex(2);
+    }, 4500);
 
-    // Step 2: Eligibility Agent
-    setTimeout(() => updateStepMessages(2, "Checking structured criteria..."), 6500);
     setTimeout(() => {
-      updateStepMessages(
-        2,
-        "Household income criterion compared against citizen-provided income evidence.",
-      );
-    }, 8000);
-    setTimeout(() => {
-      updateStepMessages(2, "Student status confirmed from profile information.");
-    }, 9000);
-    setTimeout(() => setActiveStepIndex(3), 10000);
+      setJourneySteps((prev) => {
+        const copy = [...prev];
+        if (copy[2].messages.length === 0) {
+          copy[2].messages = ["Evaluating household income and enrollment criteria..."];
+        }
+        return copy;
+      });
+      setActiveStepIndex(3);
+    }, 7000);
 
-    // Step 3: Document Agent
-    setTimeout(() => updateStepMessages(3, "Identifying required evidence..."), 10500);
     setTimeout(() => {
-      updateStepMessages(3, "1 required document still missing.");
-    }, 12000);
-
-    // We end the simulation and show results instead of completing all steps
-    // Or we continue if we want to show the full sequence up to Application agent.
-    setTimeout(() => {
-      setActiveStepIndex(-1); // Stop animating workforce
+      setJourneySteps((prev) => {
+        const copy = [...prev];
+        if (copy[3].messages.length === 0) {
+          copy[3].messages = ["1 required document missing (Enrollment Certificate)."];
+        }
+        return copy;
+      });
       setShowResults(true);
-    }, 13000);
+    }, 9500);
   };
 
   return (

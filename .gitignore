@@ -27,6 +27,13 @@ dist-ssr
 .DS_Store
 *.suo
 *.ntvs*
-*.njsproj
-*.sln
 *.sw?
+
+# Environment files
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+

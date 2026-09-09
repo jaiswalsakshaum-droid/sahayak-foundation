@@ -1,0 +1,212 @@
+# Sahayak — Phase 1 Audit + Phase 2 Implementation Plan (Real AI Workforce)
+
+**Team DietCode · Build with Bharat 2.0**
+
+---
+
+## Part 0 — Phase 1 audit: what's solid, what needs fixing before Phase 2
+
+I checked every artifact in your Phase 1 log against the plan and against the original repo (not just skimmed — traced the actual data flow for each). Overall verdict: **the schema, RLS design, and the "same signatures, real queries, safe fallback" migration pattern in `services.ts` are genuinely well executed** — that's the hard part of Phase 1 and it's done right. But there are four bugs that will bite you specifically *around the demo*, plus a few smaller correctness gaps. Fix these before or alongside Phase 2 — several of them are actually prerequisites for Phase 2 to work at all.
+
+### 🔴 Must-fix before your final demo
+
+**1. The demo login shortcut breaks the moment real Supabase is connected.**
+In `src/lib/auth.ts`, `signIn()` checks for hardcoded credentials (`4321`/`1234`, `admin`/`admin`) *before* checking `isSupabaseConfigured`, and on match it just does `localStorage.setItem("sahayak_auth", "true")` — no real Supabase session is created. But `getSession()` only reads `localStorage` when `isSupabaseConfigured` is **false**; once you plug in real Supabase env vars (which you must, for the rest of Phase 1 to mean anything), `getSession()` ignores that flag entirely and checks `supabase.auth.getSession()` instead. Result: you type `admin`/`admin`, it says success, redirects to `/dashboard` — and `requireAuth()` on that route immediately bounces you back to `/login`, because there's no real session. This is the exact failure mode that shows up live in front of judges if anyone reaches for the "quick demo login" out of habit. **Fix:** delete the hardcoded-credential branch entirely, or make it *only* active when `!isSupabaseConfigured`, and instead seed one real Supabase Auth user (`rahul@sahayak.demo` / a real password) for the demo login.
+
+**2. `seed-demo-data` doesn't actually seed the demo scenario.**
+This was the single most important deliverable of Phase 1 for pitch reliability — "every demo run starts from the same known-good state." Looking at the actual code, the edge function **only upserts the 5 scheme rows.** It never creates the Rahul Sharma profile, never inserts the `eligibility_rules` / `document_requirements` rows (those only exist in the separate `seed.sql`, which isn't idempotent-safe to re-run against a citizen's live data and isn't wired to run automatically), and critically **never creates the in-progress application with the missing enrollment certificate** that your entire `/assistant` and `/dashboard` demo narrative depends on. Right now, if you truly ran everything through real Supabase, `/dashboard` would show an empty state, not "Benefits discovered: 3, Applications in progress: 2." **Fix:** extend `seed-demo-data` to also upsert the demo citizen's `profiles` row, run the `eligibility_rules`/`document_requirements` inserts from `seed.sql` inside the same function (so it's one reproducible call), and create the actual `applications` row in `awaiting_approval`/`under_review` state with a linked `documents` row marked missing — i.e., encode your entire demo script as data, not just the catalog.
+
+**3. `getApplicationStatus()` is still 100% hardcoded — it never queries the database.**
+The function signature takes `_applicationId` (note the underscore — deliberately unused) and always returns the same fake "submitted" timeline regardless of what's actually in `applications`. This was explicitly scoped as Phase 1 work in the migration table, not deferred to Phase 2, so it's an incomplete item, not a design choice. **Fix:** replace with a real `select` on `applications` by id/tracking_id, and derive the timeline array from `status` (a `switch`/lookup table mapping `status` → which timeline steps are `completed`/`current`/`pending` is enough; no need for a separate timeline table yet).
+
+**4. Document upload never touches Supabase Storage.**
+`validateDocument()` inserts a `documents` metadata row (fake OCR result) but never calls `supabase.storage.from('documents').upload(...)`, so `file_path` stays null and the Storage bucket + RLS policies you built in the migration are currently dead code. This fails the Phase 1 acceptance checklist item directly ("upload a document, confirm the file lands under `documents/{uid}/...`"). **Fix:** in the document upload handler, actually upload the file to `documents/{citizen_id}/{filename}` before inserting the metadata row, and store the returned path in `file_path`.
+
+### 🟡 Should-fix — correctness and security
+
+**5. `prepareApplication()`'s upsert has no real conflict key.** It calls `.upsert({...})` without an `id`, and there's no unique constraint on `(citizen_id, scheme_id)` in the schema — so every time a citizen re-enters the assistant flow for the same scheme, a brand-new duplicate `applications` row is created instead of resuming the existing draft. Add `unique (citizen_id, scheme_id)` to the `applications` table (or explicit select-then-insert-or-update logic in the service), so "resume your application" behaves correctly and `/applications` doesn't show ghost duplicates during rehearsal.
+
+**6. `audit_logs` insert policy is `with check (true)`** — meaning *any* authenticated citizen can currently write an arbitrary audit-log row claiming to be any agent, for any run. This quietly undermines your own pitch claim ("evidence-backed," "trustworthy audit trail"). It also happens to be exactly the thing Phase 2 needs to fix anyway (see Part 3.3 below) — Phase 2's Render service should be the *only* writer to `agent_events`/`audit_logs`, using the service-role key, with client-side insert access revoked entirely.
+
+**7. `/analytics` (the admin metrics/charts page) only requires login, not admin role.** It imports `MOCK_ADMIN_METRICS`/real aggregate queries meant to show org-wide numbers, but its route guard is `requireAuth()`, not `requireAdmin()` — any logged-in citizen can currently open it. RLS happens to soften the actual damage (a citizen's `count()` queries against `applications` etc. get silently scoped down to just their own rows by RLS, so they won't see other citizens' data), but the page itself will render confusing, wrong numbers to a regular user and the guard doesn't match the intended access model. Swap it to `requireAdmin()`.
+
+### 🟢 Config item, not code — verify this manually
+
+**8. Check that "Confirm email" is disabled in Supabase Auth settings.** Your signup flow synthesizes addresses like `9876543210@sahayak.local` for phone-based signup — these can never receive a real confirmation email. If email confirmation is still on (it's on by default for new Supabase projects), every signup will silently soft-lock at "check your inbox," and you won't notice until you test with a fresh account right before the demo.
+
+### Noted, not urgent
+- Eligibility checking still keys off fragile substring matching on UUIDs (`schemeId.includes("0001")`) instead of actually evaluating the fetched `eligibility_rules` rows against citizen profile data. This is *fine* for now — it was explicitly out of scope for Phase 1 — but flagging it clearly because Phase 2 must replace this with real rule evaluation, not just bolt an LLM narration on top of the same fake logic.
+- `agent_tasks_completed` in `getAdminMetrics()` is a fabricated `count * 6` heuristic rather than a real count of `agent_events`. Harmless for now, worth cleaning up whenever you touch `/admin/analytics` for real.
+
+None of this blocks starting Phase 2 — but items 1, 2, and 6 specifically intersect with what Phase 2 builds (real auth session for agent calls, real seeded demo state to orchestrate over, and who's allowed to write audit rows), so do those three first.
+
+---
+
+## Part 1 — Phase 2 goals & definition of done
+
+Phase 2 replaces the `setTimeout`-staged fake agent choreography in `/assistant` with a real multi-agent system: a Python **LangGraph** service, hosted on **Render**, calling **Groq**, that actually reads/writes the Supabase tables Phase 1 already built (`agent_runs`, `agent_events`, `audit_logs`, plus the real `schemes`/`eligibility_rules`/`applications` data).
+
+**Done means:**
+- Typing a real need into `/assistant` triggers a real backend run — not a local timer.
+- The five-agent handoff sequence (Citizen → Scheme → Eligibility → Document → Application) is driven by actual Groq calls reasoning over actual Supabase data.
+- The frontend sees this happen **live**, via Supabase Realtime subscribed to `agent_events` for that run — same progressive-reveal UX you already have, now true.
+- `/admin/agents` shows a genuinely live feed across all citizens' runs, not a static mock array.
+- The system survives a Groq `429` without crashing the whole run (this matters — free tier is ~30 RPM org-wide, and a demo with a judge poking at it plus your own rehearsal traffic can hit that).
+- Document extraction stays **mocked** this phase (real OCR/vision is Phase 3) — Document Agent still reasons over the real `document_requirements` table but doesn't actually read file contents yet. Keep that boundary explicit so Phase 2 doesn't balloon.
+
+---
+
+## Part 2 — Architecture
+
+```
+Citizen types need in /assistant
+        │
+        ▼
+Supabase Edge Function: orchestrate-agent-run
+        │  1. verifies citizen's Supabase JWT
+        │  2. inserts agent_runs row (status=PROCESSING) — service role
+        │  3. fires POST to Render, does NOT wait for completion
+        │  4. returns { run_id } to frontend immediately
+        ▼
+Render (FastAPI + LangGraph, Python)
+        │  validates internal shared-secret header (only Edge Function may call it)
+        │  runs the LangGraph agent graph as a background task
+        │  each node: calls Groq → writes agent_events + (where relevant) audit_logs
+        │             directly to Postgres using the Supabase service-role key
+        │  on completion: updates agent_runs.status = COMPLETED / ACTION REQUIRED
+        ▼
+Supabase Postgres (agent_runs / agent_events / audit_logs / applications / documents)
+        │
+        ▼  Realtime (Postgres change feed, filtered by run_id via RLS)
+Frontend /assistant subscribes to agent_events for its run_id
+        → renders each step as it arrives, exactly like today's staged UI,
+          except every message is real
+```
+
+**Why Realtime instead of streaming the HTTP response (SSE) through the Edge Function:** you already built `agent_runs`/`agent_events` as real, RLS-scoped tables in Phase 1. Supabase Realtime is purpose-built to stream Postgres changes to a subscribed client, respecting RLS automatically — so a citizen only ever receives their own run's events, for free, without you writing any stream-relay code in the Edge Function. It's less code, less to debug live, and reuses infrastructure you already have working.
+
+**Why the Edge Function doesn't wait for Render to finish:** a full run takes ~10–15 seconds across 4–5 Groq calls (matching your current simulated timing). If the Edge Function blocked on that, you'd be fighting Edge Function timeout limits for no benefit — the frontend doesn't need the HTTP response to contain the answer, it just needs a `run_id` to start listening on Realtime, which can happen within a second.
+
+---
+
+## Part 3 — LangGraph agent graph design
+
+### 3.1 State schema
+```python
+from typing import TypedDict, Optional, List, Dict, Any
+
+class SahayakState(TypedDict):
+    run_id: str
+    citizen_id: str
+    query: str
+    citizen_profile: Dict[str, Any]       # loaded once from `profiles`, at graph start
+    intent: Optional[Dict[str, Any]]
+    candidate_schemes: Optional[List[Dict[str, Any]]]
+    selected_scheme_id: Optional[str]
+    eligibility_result: Optional[Dict[str, Any]]
+    missing_documents: Optional[List[str]]
+    application_draft: Optional[Dict[str, Any]]
+    next_action: Optional[Dict[str, Any]]
+    retry_count: int
+```
+
+### 3.2 Graph shape
+```
+citizen_agent
+     │
+     ▼
+scheme_agent
+     │
+     ▼
+eligibility_agent ──(all criteria verified)──► application_agent ──► END
+     │
+     └──(any criterion missing)──► document_agent ──► eligibility_agent  (re-check, loop once)
+```
+Use `langgraph.graph.StateGraph` with a conditional edge out of `eligibility_agent` based on `state["eligibility_result"]["isEligible"]`. Cap the `document_agent → eligibility_agent` loop at one re-entry using `retry_count`, so a genuinely-stuck case (document agent can't resolve anything without real OCR yet, since that's Phase 3) still terminates the run cleanly in an `ACTION REQUIRED` state rather than looping.
+
+**Tracker Agent is deliberately not part of this graph.** It doesn't need multi-agent reasoning — it's triggered once, on submission (after the human approval step, which stays a manual citizen action exactly as today), as a simple Render endpoint (`POST /track`) that writes a notification and an `agent_events` row. Keep it out of Phase 2's scope for the live orchestration animation; wire it in Phase 3 alongside document intelligence, or as a small bonus if Phase 2 finishes early.
+
+### 3.3 What each node actually does
+
+| Node | Groq model | Reads | Writes | Notes |
+|---|---|---|---|---|
+| `citizen_agent` | `openai/gpt-oss-20b` | `state.query`, `citizen_profile` | `intent`, one `agent_events` row | Same intent-classification job `understandCitizenNeed` already does client-side — now the *real* version, with the LLM given the citizen's actual profile (income, location, occupation) for context, not just keyword matching |
+| `scheme_agent` | `openai/gpt-oss-120b` (or `compound-beta` if you want its built-in search tool) | `intent`, real `schemes` table (filtered by category) | `candidate_schemes`, `agent_events` | The model ranks/explains real scheme rows — it must justify each match against the scheme's actual `description`/`benefit`, not invent one |
+| `eligibility_agent` | `openai/gpt-oss-120b` | `citizen_profile`, real `eligibility_rules` for `selected_scheme_id` | `eligibility_result`, `agent_events`, one `audit_logs` row per criterion (this *is* your "evidence-backed" claim made real — evidence = the actual rule row + the actual profile field compared) | This is where Phase 1's fake substring-matching eligibility logic finally gets replaced — the model (or better, deterministic code wrapping the model's structured output) compares `citizen_profile.annual_income` against the rule's numeric requirement for real |
+| `document_agent` | `openai/gpt-oss-20b` | real `document_requirements` for the scheme, `documents` already on file for this citizen | `missing_documents`, `agent_events` | Still no OCR/vision this phase — it's comparing "what's required" against "what rows already exist in `documents`," which is real data even though document *content* verification is still Phase 3 |
+| `application_agent` | `openai/gpt-oss-20b` | verified profile fields, `documents` | `application_draft`, writes a real `applications` row (`status = awaiting_approval`) | Templating, not heavy reasoning — matches what `prepareApplication()` already does client-side, now triggered server-side as part of the same run |
+
+### 3.4 Structured output, not free text
+Every node must return **parseable JSON**, not prose the frontend has to guess at — use Groq's JSON mode / LangChain's `.with_structured_output()` with a Pydantic schema per node (mirroring the TypeScript types already in `services.ts` — `NeedIntent`, `SchemeMatch`, `EligibilityCriterion`, etc., so the Python and TypeScript shapes match exactly and the frontend's existing rendering code barely changes). Two fields per node output, always: a short human-readable `message` (this is what gets shown in the `/assistant` handoff UI, replacing today's hardcoded strings like `"4 potentially relevant schemes found."`) and the structured `data` payload.
+
+### 3.5 Rate limits and failure handling
+Groq's free tier is roughly 30 requests/minute, org-wide, shared across every model. A single run costs 4–6 calls; that's fine solo, but not if you're rehearsing while a judge also triggers a run. Wrap every Groq call in retry-with-backoff reading the `retry-after` header from a `429`, capped at 2 retries — on final failure, write an `agent_events` row saying so (`"Scheme Agent is experiencing high demand, retrying…"`) rather than letting the whole run silently die; this turns a rate-limit hit into a visible, explainable moment instead of a broken demo.
+
+---
+
+## Part 4 — Render service (FastAPI wrapping the LangGraph app)
+
+**Endpoints:**
+- `POST /run` — body: `{ run_id, citizen_id, query }`. Validates the `X-Sahayak-Internal-Secret` header against an env var (only the Edge Function knows this value — Render must reject everything else, including direct public requests). Loads the citizen's `profiles` row itself (service-role client), then kicks off the LangGraph invocation as a background task (`asyncio.create_task` or FastAPI's `BackgroundTasks`), and returns `202 Accepted` immediately.
+- `POST /track` — (stretch, see 3.2) writes a tracker notification on submission.
+- `GET /health` — trivial health check; use it to pre-warm Render before your demo slot (free/low tiers cold-start, and a 20-second cold start mid-pitch is a bad look — hit this endpoint a minute before you go on stage).
+
+**Env vars on Render:** `GROQ_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` (never exposed to the browser — this service is the one place it's allowed to live outside the Supabase dashboard itself), `INTERNAL_SHARED_SECRET`.
+
+**Python deps:** `langgraph`, `langchain`, `langchain-groq` (or raw `groq` SDK if you want less abstraction to debug under time pressure — for a hackathon, calling Groq's OpenAI-compatible endpoint directly with the `openai` SDK pointed at `https://api.groq.com/openai/v1` is a defensible simplification if LangGraph's LangChain-model wrapper gives you trouble), `supabase-py`, `fastapi`, `uvicorn`.
+
+---
+
+## Part 5 — Supabase Edge Function: `orchestrate-agent-run`
+
+```
+1. Read Authorization header, verify with supabase.auth.getUser(token) → reject if invalid
+2. Insert into agent_runs (citizen_id, input_query, status='PROCESSING') using service role
+   → get back run_id
+3. fetch(RENDER_URL + '/run', { headers: { 'X-Sahayak-Internal-Secret': secret }, body: { run_id, citizen_id, query } })
+   → do not await the body, just confirm the request was accepted (or fire-and-forget with a short timeout)
+4. Return { run_id } to the client
+```
+Secrets (`RENDER_URL`, `INTERNAL_SHARED_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`) go in the Edge Function's own secret store (`supabase secrets set`), never in the frontend bundle.
+
+**Tighten `audit_logs` and `agent_events` RLS now that Render is the writer:** revoke `insert` for the `authenticated` role entirely on both tables (drop the current `with check (true)` policy from Phase 1 — see fix #6 above) — only the service-role key (used by both the Edge Function for the initial run row and Render for everything after) can write. Citizens keep `select` access to their own runs' events, unchanged.
+
+---
+
+## Part 6 — Frontend changes
+
+- `src/routes/assistant.tsx`: replace `startWorkforce()`'s block of `setTimeout` calls with: call the Edge Function → get `run_id` → `supabase.channel('agent_events:run_id=eq.' + run_id).on('postgres_changes', ...)` subscription that appends each incoming row into the same `journeySteps` state shape you already render. The visual choreography (icons, handoff messages, progressive reveal) needs almost no change — you're swapping the data source, not the UI.
+- `src/routes/admin.agents.tsx`: replace the mock feed with a Realtime subscription across all `agent_events` (admin's RLS grants this), ordered by `created_at desc`.
+- Add a lightweight `useAgentRun(runId)` hook wrapping the subscription logic so both pages share it.
+
+---
+
+## Part 7 — Task order
+
+1. Apply the Part 0 fixes (1, 2, 6 at minimum — they're load-bearing for everything below).
+2. Stand up the Render service with just `/health` deployed — confirm Render↔Supabase connectivity (a script that inserts a test `agent_events` row) before writing any LangGraph logic.
+3. Build the LangGraph graph with all five nodes returning **hardcoded structured output** first (no Groq calls yet) — verify the graph shape, conditional routing, and Supabase writes end-to-end.
+4. Swap each node's hardcoded output for a real Groq call, one node at a time, testing after each swap.
+5. Build `orchestrate-agent-run` Edge Function, wire the internal secret.
+6. Tighten `agent_events`/`audit_logs` RLS (drop client insert access).
+7. Wire `/assistant` to the Edge Function + Realtime.
+8. Wire `/admin/agents` to the same Realtime pattern.
+9. Load-test with 3–4 concurrent runs to see real Groq rate-limit behavior before you're relying on it live.
+10. Full rehearsal: reset demo state via the (now-complete) `seed-demo-data`, run the whole citizen journey twice back-to-back to confirm reproducibility.
+
+## Part 8 — Acceptance checklist
+- [ ] A real, un-cached query typed into `/assistant` produces a genuinely different scheme match than a different query (proves it's not secretly still keyword-matched)
+- [ ] Killing the Render service mid-run leaves the UI in a sane "action required / retry" state, not an infinite spinner
+- [ ] `/admin/agents` shows two different citizens' runs interleaved correctly when triggered close together
+- [ ] A forced Groq `429` (temporarily drop your rate limit by hammering the API in another terminal) is visibly handled, not fatal
+- [ ] `audit_logs` cannot be written to from the browser console using the citizen's own session (confirms the RLS tightening actually took)
+- [ ] Cold-start Render, then immediately run the full demo flow, to know your worst-case pitch-day timing
+
+## Part 9 — Explicit non-goals for Phase 2
+- No real OCR/vision — Document Agent reasons over `document_requirements` rows, not file contents (Phase 3).
+- No retry/resume of a half-finished run — if a run fails, the citizen re-triggers from `/assistant`; don't build checkpointing yet.
+- No horizontal scaling concerns on Render — a single instance is fine for a hackathon's concurrent-judges load.
+
+---
+
+Once Phase 2 is live end-to-end, Phase 3 (document intelligence + tightening the live orchestration view) becomes a much smaller, well-scoped piece of work — happy to write that one out in the same depth once you're ready.
