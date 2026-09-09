@@ -17,13 +17,11 @@ import {
   FileKey,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { MOCK_AGENT_EVENTS } from "@/lib/admin-services";
-
-import { requireAuth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
 
 export const Route = createFileRoute("/admin/agents")({
   beforeLoad: async () => {
-    await requireAuth();
+    await requireAdmin();
   },
   component: AdminAgentsPage,
 });
