@@ -13,6 +13,7 @@ logger = logging.getLogger("sahayak.document_extractor")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 MODEL_VISION = os.getenv("MODEL_VISION", "qwen/qwen3.6-27b")
 MODEL_FAST = os.getenv("MODEL_FAST", "openai/gpt-oss-20b")
 

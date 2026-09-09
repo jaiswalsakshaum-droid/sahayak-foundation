@@ -337,6 +337,8 @@ export type DocumentValidationResult = {
   validity: string;
   confidence: number;
   extractedFields: Record<string, string>;
+  documentId?: string;
+  status?: string;
 };
 
 /**
@@ -383,7 +385,7 @@ export async function validateDocument(file: any): Promise<DocumentValidationRes
           }
         }
 
-        // Insert the document metadata row — status starts as "processing" when we have a file path
+        // Insert the document metadata row — status starts as "pending" when we have a file path
         const { data: insertedDoc, error: insertError } = await supabase
           .from("documents")
           .insert({
@@ -391,7 +393,7 @@ export async function validateDocument(file: any): Promise<DocumentValidationRes
             document_type: result.type,
             file_name: file?.name || "Uploaded_Document.pdf",
             file_path: uploadedPath,
-            status: uploadedPath ? "processing" : "verified",
+            status: uploadedPath ? "pending" : "verified",
             confidence: uploadedPath ? 0 : result.confidence / 100,
             extracted_fields: uploadedPath ? {} : result.extractedFields,
           })
@@ -408,7 +410,7 @@ export async function validateDocument(file: any): Promise<DocumentValidationRes
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${session.access_token}`,
+              Authorization: `Bearer ${session.access_token || ""}`,
               apikey: import.meta.env.VITE_SUPABASE_ANON_KEY || "",
             },
             body: JSON.stringify({ document_id: insertedDoc.id }),
@@ -420,6 +422,8 @@ export async function validateDocument(file: any): Promise<DocumentValidationRes
           // the documents table update once Groq Vision analysis completes (~5–15s)
           return {
             ...result,
+            documentId: insertedDoc.id,
+            status: "pending",
             confidence: 0,
             extractedFields: {
               Status: "Extraction in progress...",
@@ -427,6 +431,8 @@ export async function validateDocument(file: any): Promise<DocumentValidationRes
               Note: "Fields will appear once Groq Vision analysis completes",
             },
           };
+        } else if (insertedDoc?.id) {
+          result.documentId = insertedDoc.id;
         }
       }
     } catch (err) {

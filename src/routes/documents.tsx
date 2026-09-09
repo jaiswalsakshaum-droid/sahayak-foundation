@@ -1,5 +1,5 @@
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   UploadCloud,
   FileText,
@@ -12,8 +12,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { validateDocument, type DocumentValidationResult } from "@/lib/services";
-
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, getSession } from "@/lib/auth";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
 export const Route = createFileRoute("/documents")({
   beforeLoad: async () => {
@@ -22,7 +22,14 @@ export const Route = createFileRoute("/documents")({
   component: DocumentsPage,
 });
 
-const DEMO_DOCUMENTS = [
+type DocumentItem = {
+  name: string;
+  type: string;
+  status: string;
+  date: string;
+};
+
+const DEMO_DOCUMENTS: DocumentItem[] = [
   { name: "Aadhaar Card", type: "Identity Proof", status: "Verified", date: "Today" },
   { name: "Income Certificate", type: "Income Proof", status: "Verified", date: "Yesterday" },
   { name: "Bank Passbook", type: "Financial", status: "Needs Review", date: "2 days ago" },
@@ -36,13 +43,94 @@ const DEMO_DOCUMENTS = [
   },
 ];
 
-import { useRef } from "react";
-
 function DocumentsPage() {
   const [uploadState, setUploadState] = useState<"idle" | "processing" | "complete">("idle");
   const [processStep, setProcessStep] = useState(-1);
   const [result, setResult] = useState<DocumentValidationResult | null>(null);
+  const [documentsList, setDocumentsList] = useState<DocumentItem[]>(DEMO_DOCUMENTS);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch real user documents from Supabase on mount
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    let active = true;
+
+    async function loadUserDocuments() {
+      try {
+        const session = await getSession();
+        if (!session?.user?.id) return;
+
+        const { data, error } = await supabase
+          .from("documents")
+          .select("*")
+          .eq("citizen_id", session.user.id)
+          .order("created_at", { ascending: false });
+
+        if (!error && data && data.length > 0 && active) {
+          const mapped: DocumentItem[] = data.map((doc: any) => ({
+            name: doc.file_name || doc.document_type || "Document",
+            type: doc.document_type || "Government Document",
+            status:
+              doc.status === "verified"
+                ? "Verified"
+                : doc.status === "needs_review"
+                ? "Needs Review"
+                : doc.status === "pending"
+                ? "Pending"
+                : doc.status === "missing"
+                ? "Missing"
+                : doc.status || "Verified",
+            date: doc.created_at ? new Date(doc.created_at).toLocaleDateString() : "Recently",
+          }));
+          setDocumentsList(mapped);
+        }
+      } catch (e) {
+        console.warn("[Sahayak] Failed to load user documents:", e);
+      }
+    }
+
+    loadUserDocuments();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Subscribe to real-time updates on the uploaded document to replace placeholders when extraction finishes
+  useEffect(() => {
+    if (!result?.documentId || !isSupabaseConfigured) return;
+
+    const docId = result.documentId;
+    const channel = supabase
+      .channel(`doc-updates-${docId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "documents",
+          filter: `id=eq.${docId}`,
+        },
+        (payload) => {
+          const updated = payload.new as any;
+          if (updated && updated.extracted_fields && Object.keys(updated.extracted_fields).length > 0) {
+            setResult((prev) => {
+              if (!prev) return null;
+              return {
+                ...prev,
+                confidence: Math.round((updated.confidence || 0.95) * 100),
+                extractedFields: updated.extracted_fields,
+                status: updated.status || "verified",
+              };
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [result?.documentId]);
 
   const processingSteps = [
     "Upload received & stored in Supabase",
@@ -118,8 +206,8 @@ function DocumentsPage() {
               <AlertTriangle className="size-5" /> Needs Attention
             </h2>
             <div className="grid gap-3">
-              {DEMO_DOCUMENTS.filter((d) =>
-                ["Missing", "Needs Review", "Expired"].includes(d.status),
+              {documentsList.filter((d) =>
+                ["Missing", "Needs Review", "Expired", "Pending", "pending", "needs_review", "missing"].includes(d.status),
               ).map((doc) => (
                 <div
                   key={doc.name}
@@ -151,7 +239,7 @@ function DocumentsPage() {
               <CheckCircle2 className="size-5" /> Verified Evidence
             </h2>
             <div className="grid gap-3">
-              {DEMO_DOCUMENTS.filter((d) => d.status === "Verified").map((doc) => (
+              {documentsList.filter((d) => ["Verified", "verified"].includes(d.status)).map((doc) => (
                 <div
                   key={doc.name}
                   className="flex items-center justify-between p-4 rounded-xl border border-line bg-card shadow-sm"
