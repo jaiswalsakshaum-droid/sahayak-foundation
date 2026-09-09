@@ -340,7 +340,8 @@ export type DocumentValidationResult = {
 };
 
 /**
- * Validate document and persist in documents table & Supabase Storage
+ * Validate document, persist in documents table & Supabase Storage,
+ * then fire the extract-document Edge Function for real Groq Vision analysis.
  */
 export async function validateDocument(file: any): Promise<DocumentValidationResult> {
   const result: DocumentValidationResult = {
@@ -382,15 +383,51 @@ export async function validateDocument(file: any): Promise<DocumentValidationRes
           }
         }
 
-        await supabase.from("documents").insert({
-          citizen_id: session.user.id,
-          document_type: result.type,
-          file_name: file?.name || "Uploaded_Document.pdf",
-          file_path: uploadedPath,
-          status: "verified",
-          confidence: result.confidence,
-          extracted_fields: result.extractedFields,
-        });
+        // Insert the document metadata row — status starts as "processing" when we have a file path
+        const { data: insertedDoc, error: insertError } = await supabase
+          .from("documents")
+          .insert({
+            citizen_id: session.user.id,
+            document_type: result.type,
+            file_name: file?.name || "Uploaded_Document.pdf",
+            file_path: uploadedPath,
+            status: uploadedPath ? "processing" : "verified",
+            confidence: uploadedPath ? 0 : result.confidence / 100,
+            extracted_fields: uploadedPath ? {} : result.extractedFields,
+          })
+          .select("id")
+          .single();
+
+        if (!insertError && insertedDoc?.id && uploadedPath) {
+          // Fire extraction Edge Function asynchronously — do not await
+          // The Render backend will call Groq Vision and update the documents row directly
+          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
+          const edgeFunctionUrl = `${supabaseUrl}/functions/v1/extract-document`;
+
+          fetch(edgeFunctionUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session.access_token}`,
+              apikey: import.meta.env.VITE_SUPABASE_ANON_KEY || "",
+            },
+            body: JSON.stringify({ document_id: insertedDoc.id }),
+          }).catch((err) => {
+            console.warn("[Sahayak] extract-document Edge Function dispatch error:", err);
+          });
+
+          // Return an in-progress result — the real extracted fields will populate via
+          // the documents table update once Groq Vision analysis completes (~5–15s)
+          return {
+            ...result,
+            confidence: 0,
+            extractedFields: {
+              Status: "Extraction in progress...",
+              "Document ID": insertedDoc.id.slice(0, 8).toUpperCase(),
+              Note: "Fields will appear once Groq Vision analysis completes",
+            },
+          };
+        }
       }
     } catch (err) {
       console.warn("[Sahayak Services] Document insert/upload error:", err);

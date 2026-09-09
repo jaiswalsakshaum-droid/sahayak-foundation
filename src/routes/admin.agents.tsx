@@ -376,7 +376,7 @@ function AdminAgentsPage() {
                   Live Activity Stream
                 </h3>
               </div>
-              {simMode && <span className="flex size-2 rounded-full bg-rose-500 animate-pulse" />}
+              <span className="flex size-2 rounded-full bg-sage animate-pulse" />
             </div>
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {events.length === 0 ? (

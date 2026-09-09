@@ -18,7 +18,7 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
     const supabaseServiceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     const renderUrl = Deno.env.get("RENDER_BACKEND_URL") ?? "http://localhost:8000";
-    const internalSecret = Deno.env.get("INTERNAL_SHARED_SECRET") ?? "sahayak-internal-secret-2026";
+    const internalSecret = Deno.env.get("INTERNAL_SHARED_SECRET") ?? "";
 
     if (!supabaseUrl || !supabaseServiceRoleKey) {
       throw new Error(
@@ -26,21 +26,39 @@ Deno.serve(async (req) => {
       );
     }
 
+    if (!internalSecret) {
+      console.error("[orchestrate-agent-run] INTERNAL_SHARED_SECRET is not configured!");
+      return new Response(
+        JSON.stringify({ error: "Server misconfiguration: missing internal secret" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey);
 
-    // 1. Verify caller authentication
+    // 1. Require a valid Authorization header — no citizen impersonation fallback
     const authHeader = req.headers.get("Authorization");
-    let citizenId = "d0000000-0000-0000-0000-000000000001"; // Default demo fallback
-
-    if (authHeader) {
-      const token = authHeader.replace("Bearer ", "");
-      const {
-        data: { user },
-      } = await supabaseAdmin.auth.getUser(token);
-      if (user?.id) {
-        citizenId = user.id;
-      }
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized: missing Authorization header" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
+
+    const token = authHeader.replace("Bearer ", "");
+    const {
+      data: { user },
+      error: authError,
+    } = await supabaseAdmin.auth.getUser(token);
+
+    if (authError || !user?.id) {
+      return new Response(
+        JSON.stringify({ error: "Unauthorized: invalid or expired token" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    const citizenId = user.id; // no fallback default, ever
 
     const body = await req.json().catch(() => ({}));
     const query = body.query || "I need financial support for my daughter's education.";

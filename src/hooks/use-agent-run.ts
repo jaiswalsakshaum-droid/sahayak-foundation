@@ -14,23 +14,37 @@ export type LiveAgentEvent = {
 export function useAgentRun() {
   const [runId, setRunId] = useState<string | null>(null);
   const [events, setEvents] = useState<LiveAgentEvent[]>([]);
-  const [status, setStatus] = useState<"IDLE" | "PROCESSING" | "ACTION_REQUIRED" | "COMPLETED">(
+  const [status, setStatus] = useState<"IDLE" | "PROCESSING" | "ACTION_REQUIRED" | "COMPLETED" | "ERROR">(
     "IDLE",
   );
   const [activeAgentIndex, setActiveAgentIndex] = useState<number>(-1);
   const [latestData, setLatestData] = useState<Record<string, any>>({});
-  const channelRef = useRef<any>(null);
+  const eventsChannelRef = useRef<any>(null);
+  const runsChannelRef = useRef<any>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Subscribe to Realtime Postgres changes for this run_id
+  // Clear timeout helper
+  const clearRunTimeout = () => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  };
+
+  // Subscribe to agent_events (message feed) and agent_runs (status ground truth)
   useEffect(() => {
     if (!runId || !isSupabaseConfigured) return;
 
-    // Clean up previous channel if any
-    if (channelRef.current) {
-      supabase.removeChannel(channelRef.current);
+    // Clean up previous channels if any
+    if (eventsChannelRef.current) {
+      supabase.removeChannel(eventsChannelRef.current);
+    }
+    if (runsChannelRef.current) {
+      supabase.removeChannel(runsChannelRef.current);
     }
 
-    const channel = supabase
+    // Channel 1: agent_events — live message feed for the run
+    const eventsChannel = supabase
       .channel(`agent_events:${runId}`)
       .on(
         "postgres_changes",
@@ -44,7 +58,10 @@ export function useAgentRun() {
           const newEvent = payload.new as LiveAgentEvent;
           setEvents((prev) => [...prev, newEvent]);
 
-          // Update active agent index based on agent name
+          // Receiving any event means the run is alive — cancel the timeout
+          clearRunTimeout();
+
+          // Update active agent index based on agent name (display only, not status ground truth)
           const agentName = newEvent.agent_name.toLowerCase();
           if (agentName.includes("citizen")) {
             setActiveAgentIndex(0);
@@ -54,10 +71,8 @@ export function useAgentRun() {
             setActiveAgentIndex(2);
           } else if (agentName.includes("document")) {
             setActiveAgentIndex(3);
-            setStatus("ACTION_REQUIRED");
           } else if (agentName.includes("application")) {
             setActiveAgentIndex(4);
-            setStatus("COMPLETED");
           }
 
           if (newEvent.details) {
@@ -67,16 +82,53 @@ export function useAgentRun() {
       )
       .subscribe();
 
-    channelRef.current = channel;
+    eventsChannelRef.current = eventsChannel;
+
+    // Channel 2: agent_runs — STATUS is the ground truth (not inferred from agent names)
+    const runsChannel = supabase
+      .channel(`agent_runs_status:${runId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "agent_runs",
+          filter: `id=eq.${runId}`,
+        },
+        (payload) => {
+          const updatedStatus = payload.new?.status as string | undefined;
+          if (!updatedStatus) return;
+
+          // Cancel timeout — the run completed (one way or another)
+          clearRunTimeout();
+
+          if (updatedStatus === "COMPLETED") {
+            setStatus("COMPLETED");
+            setActiveAgentIndex(4);
+          } else if (updatedStatus === "ACTION REQUIRED") {
+            setStatus("ACTION_REQUIRED");
+          } else if (updatedStatus === "ERROR" || updatedStatus === "FAILED") {
+            setStatus("ERROR");
+          }
+        },
+      )
+      .subscribe();
+
+    runsChannelRef.current = runsChannel;
 
     return () => {
-      if (channelRef.current) {
-        supabase.removeChannel(channelRef.current);
+      clearRunTimeout();
+      if (eventsChannelRef.current) {
+        supabase.removeChannel(eventsChannelRef.current);
+      }
+      if (runsChannelRef.current) {
+        supabase.removeChannel(runsChannelRef.current);
       }
     };
   }, [runId]);
 
   const startRun = useCallback(async (query: string) => {
+    clearRunTimeout();
     setStatus("PROCESSING");
     setEvents([]);
     setLatestData({});
@@ -85,12 +137,16 @@ export function useAgentRun() {
     const generatedRunId = `run-${Date.now()}`;
     setRunId(generatedRunId);
 
+    // 9-second safety timeout — if nothing comes back, surface an error instead of an infinite spinner
+    timeoutRef.current = setTimeout(() => {
+      setStatus("ERROR");
+    }, 9000);
+
     if (isSupabaseConfigured) {
       try {
         const session = await getSession();
         const token = session?.access_token || "";
 
-        // Attempt to call orchestrate-agent-run Edge function or direct local backend
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
         const edgeFunctionUrl = `${supabaseUrl}/functions/v1/orchestrate-agent-run`;
 
@@ -107,15 +163,21 @@ export function useAgentRun() {
         if (res.ok) {
           const data = await res.json();
           if (data.run_id) {
+            // Use the server-assigned run_id so our Realtime subscriptions match the DB row
             setRunId(data.run_id);
             return data.run_id;
           }
+        } else if (res.status === 401) {
+          // Auth error — surface immediately, don't wait for timeout
+          clearRunTimeout();
+          setStatus("ERROR");
         }
       } catch (err) {
         console.warn(
-          "[useAgentRun] Edge function notice, running with local simulation fallback:",
+          "[useAgentRun] Edge function error:",
           err,
         );
+        // Don't clear timeout — let it fire naturally if no events arrive
       }
     }
 
