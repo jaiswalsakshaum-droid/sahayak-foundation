@@ -165,10 +165,58 @@ Deno.serve(async (req) => {
       .from("document_requirements")
       .upsert(demoDocReqs, { onConflict: "scheme_id,document_type" });
 
+    // 4. Upsert Demo Citizen Profile
+    const demoCitizenId = "d0000000-0000-0000-0000-000000000001";
+    await supabaseAdmin.from("profiles").upsert({
+      id: demoCitizenId,
+      full_name: "Rahul Sharma",
+      age: 20,
+      gender: "Male",
+      annual_income: 210000,
+      occupation: "Student / Agricultural Assistant",
+      state: "Uttar Pradesh",
+      district: "Lucknow",
+      caste_category: "OBC",
+      is_student: true,
+      is_farmer: false,
+    }, { onConflict: "id" });
+
+    // 5. Upsert In-Progress Application (awaiting missing enrollment cert)
+    await supabaseAdmin.from("applications").upsert({
+      citizen_id: demoCitizenId,
+      scheme_id: "a0000000-0000-0000-0000-000000000001",
+      status: "under_review",
+      tracking_id: "SAH-2026-DEMO01",
+      applicant_info: {
+        "Full Name": { value: "Rahul Sharma", status: "verified" },
+        "Annual Income": { value: "₹2,10,000", status: "verified" },
+      },
+    }, { onConflict: "citizen_id,scheme_id" });
+
+    // 6. Upsert Citizen's Verified Documents (Aadhaar & Income on file, Enrollment missing)
+    await supabaseAdmin.from("documents").upsert([
+      {
+        citizen_id: demoCitizenId,
+        document_type: "Aadhaar Card",
+        status: "verified",
+        confidence: 0.98,
+        file_name: "aadhaar_rahul_sharma.pdf",
+        extracted_fields: { Name: "Rahul Sharma", DOB: "15-08-2004", "ID Number": "XXXX-XXXX-4321" },
+      },
+      {
+        citizen_id: demoCitizenId,
+        document_type: "Income Certificate",
+        status: "verified",
+        confidence: 0.95,
+        file_name: "income_cert_2026.pdf",
+        extracted_fields: { Name: "Rahul Sharma", "Annual Income": "₹2,10,000", "Issue Date": "2026-04-10" },
+      },
+    ]);
+
     return new Response(
       JSON.stringify({
         success: true,
-        message: "Complete Sahayak demo scenario successfully seeded.",
+        message: "Complete Sahayak demo scenario (schemes, rules, Rahul Sharma profile, application & documents) successfully seeded.",
         schemesCount: demoSchemes.length,
       }),
       {

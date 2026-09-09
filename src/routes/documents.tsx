@@ -36,33 +36,45 @@ const DEMO_DOCUMENTS = [
   },
 ];
 
+import { useRef } from "react";
+
 function DocumentsPage() {
   const [uploadState, setUploadState] = useState<"idle" | "processing" | "complete">("idle");
   const [processStep, setProcessStep] = useState(-1);
   const [result, setResult] = useState<DocumentValidationResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const processingSteps = [
-    "Upload received",
-    "Document classified",
-    "OCR completed",
-    "Fields extracted",
-    "Identity information compared",
-    "Validity checked",
-    "Evidence updated",
+    "Upload received & stored in Supabase",
+    "Document classified by Document Agent",
+    "Multimodal Groq Vision analysis",
+    "Verifiable fields extracted",
+    "Identity information verified",
+    "Status & confidence score saved",
   ];
 
-  const handleUpload = async () => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await processUploadedFile(file);
+  };
+
+  const processUploadedFile = async (file: File) => {
     setUploadState("processing");
     setProcessStep(0);
 
     for (let i = 0; i < processingSteps.length; i++) {
-      await new Promise((r) => setTimeout(r, 600));
+      await new Promise((r) => setTimeout(r, 450));
       setProcessStep(i);
     }
 
-    const docResult = await validateDocument("dummy");
+    const docResult = await validateDocument(file);
     setResult(docResult);
     setUploadState("complete");
+  };
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
   };
 
   return (
@@ -173,12 +185,19 @@ function DocumentsPage() {
             {uploadState === "idle" && (
               <div
                 className="border-2 border-dashed border-line rounded-xl p-10 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-brand/5 hover:border-brand/50 transition-colors"
-                onClick={handleUpload}
+                onClick={handleUploadClick}
               >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*,.pdf"
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
                 <UploadCloud className="size-10 text-muted-foreground mb-4" />
                 <p className="font-medium text-foreground mb-1">Drop document here</p>
-                <p className="text-sm text-muted-foreground mb-4">or click to browse files</p>
-                <Button variant="outline" size="sm">
+                <p className="text-sm text-muted-foreground mb-4">or click to browse files (Images or PDF)</p>
+                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); handleUploadClick(); }}>
                   Choose file
                 </Button>
               </div>

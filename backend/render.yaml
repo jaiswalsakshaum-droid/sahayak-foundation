@@ -19,3 +19,5 @@ services:
         value: openai/gpt-oss-20b
       - key: MODEL_REASONING
         value: openai/gpt-oss-120b
+      - key: MODEL_VISION
+        value: qwen/qwen3.6-27b

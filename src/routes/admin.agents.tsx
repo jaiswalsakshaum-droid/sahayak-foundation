@@ -124,9 +124,7 @@ import { getRecentAgentEvents } from "@/lib/admin-services";
 
 function AdminAgentsPage() {
   const [selectedAgent, setSelectedAgent] = useState<(typeof AGENTS_DATA)[0] | null>(null);
-  const [simMode, setSimMode] = useState(false);
-  const [activeNode, setActiveNode] = useState(0);
-  const [events, setEvents] = useState<typeof MOCK_AGENT_EVENTS>([]);
+  const [events, setEvents] = useState<any[]>([]);
 
   // Load initial events and subscribe to live agent_events across all runs
   useEffect(() => {
@@ -148,6 +146,7 @@ function AdminAgentsPage() {
             const row = payload.new as any;
             const newEv = {
               id: row.id,
+              run_id: row.run_id,
               timestamp: new Date(row.created_at || Date.now()).toLocaleTimeString([], {
                 hour: "2-digit",
                 minute: "2-digit",
@@ -167,27 +166,6 @@ function AdminAgentsPage() {
       };
     }
   }, []);
-
-  useEffect(() => {
-    if (!simMode) {
-      setActiveNode(0);
-      return;
-    }
-
-    // Simulate events stream on manual button click
-    let step = 0;
-    const interval = setInterval(() => {
-      if (step < MOCK_AGENT_EVENTS.length) {
-        setActiveNode(step + 1);
-        setEvents((prev) => [MOCK_AGENT_EVENTS[step], ...prev]);
-        step++;
-      } else {
-        clearInterval(interval);
-      }
-    }, 1500);
-
-    return () => clearInterval(interval);
-  }, [simMode]);
 
   return (
     <div className="min-h-screen bg-ice-2 text-foreground flex flex-col overflow-hidden">
@@ -221,65 +199,54 @@ function AdminAgentsPage() {
               <h3 className="font-semibold text-sm uppercase tracking-wider text-muted-foreground">
                 Collaboration Flow
               </h3>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setSimMode(!simMode)}
-                className="h-7 text-xs"
-              >
-                {simMode ? "Stop Simulation" : "Run Simulation"}
-              </Button>
+              <span className="inline-flex items-center gap-1.5 text-xs text-sage font-medium">
+                <span className="size-2 rounded-full bg-sage animate-pulse" /> Live Realtime
+              </span>
             </div>
 
             <div className="flex flex-col items-center">
-              <FlowBox label="Citizen" active={simMode && activeNode === 0} />
-              <FlowArrow active={simMode && activeNode === 1} />
+              <FlowBox label="Citizen" />
+              <FlowArrow />
 
               <FlowBox
                 label="Citizen Agent"
                 agentId="citizen"
                 onClick={() => setSelectedAgent(AGENTS_DATA[0])}
-                active={simMode && activeNode === 1}
               />
-              <FlowArrow active={simMode && activeNode === 2} />
+              <FlowArrow />
 
               <FlowBox
                 label="Scheme Agent"
                 agentId="scheme"
                 onClick={() => setSelectedAgent(AGENTS_DATA[1])}
-                active={simMode && activeNode === 2}
               />
-              <FlowArrow active={simMode && activeNode === 3} />
+              <FlowArrow />
 
               <FlowBox
                 label="Eligibility Agent"
                 agentId="eligibility"
                 onClick={() => setSelectedAgent(AGENTS_DATA[2])}
-                active={simMode && activeNode === 3}
               />
-              <FlowArrow active={simMode && activeNode === 4} />
+              <FlowArrow />
 
               <FlowBox
                 label="Document Agent"
                 agentId="document"
                 onClick={() => setSelectedAgent(AGENTS_DATA[3])}
-                active={simMode && activeNode === 4}
               />
-              <FlowArrow active={simMode && activeNode === 5} />
+              <FlowArrow />
 
               <FlowBox
                 label="Eligibility Agent"
                 agentId="eligibility"
                 onClick={() => setSelectedAgent(AGENTS_DATA[2])}
-                active={simMode && activeNode === 5}
               />
-              <FlowArrow active={simMode && activeNode === 6} />
+              <FlowArrow />
 
               <FlowBox
                 label="Application Agent"
                 agentId="application"
                 onClick={() => setSelectedAgent(AGENTS_DATA[4])}
-                active={simMode && activeNode === 6}
               />
               <FlowArrow />
 
@@ -411,11 +378,11 @@ function AdminAgentsPage() {
               </div>
               {simMode && <span className="flex size-2 rounded-full bg-rose-500 animate-pulse" />}
             </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {events.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-50">
+                <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-50 py-12">
                   <Activity className="size-8 mb-2" />
-                  <p className="text-sm">Run simulation to simulate traffic</p>
+                  <p className="text-sm">Listening for real-time agent events...</p>
                 </div>
               ) : (
                 events.map((event) => (
@@ -423,11 +390,16 @@ function AdminAgentsPage() {
                     key={event.id}
                     className="animate-in fade-in slide-in-from-right-4 p-3 rounded-lg bg-ice-2 border border-line text-sm"
                   >
-                    <div className="flex justify-between text-xs text-muted-foreground mb-1">
-                      <span>{event.agent}</span>
-                      <span className="font-mono">{event.timestamp}</span>
+                    <div className="flex justify-between items-center text-xs text-muted-foreground mb-1">
+                      <span className="font-semibold text-foreground">{event.agent}</span>
+                      <span className="font-mono text-[11px]">{event.timestamp}</span>
                     </div>
-                    <p className="font-medium">{event.action}</p>
+                    <p className="font-medium text-xs leading-relaxed text-foreground/90">{event.action}</p>
+                    {event.run_id && (
+                      <div className="mt-1.5 pt-1.5 border-t border-line/60 flex items-center justify-between text-[10px] text-muted-foreground font-mono">
+                        <span>Run: #{event.run_id.slice(0, 8)}</span>
+                      </div>
+                    )}
                   </div>
                 ))
               )}

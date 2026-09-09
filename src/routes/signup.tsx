@@ -104,10 +104,10 @@ function SignupPage() {
                   />
                 </label>
                 <label className="block text-sm font-medium">
-                  Mobile number
+                  Email ID or Mobile number
                   <Input
                     className="mt-2 bg-card"
-                    placeholder="+91 98765 43210"
+                    placeholder="youremail@gmail.com"
                     value={mobile}
                     onChange={(e) => setMobile(e.target.value)}
                     disabled={isLoading || isSuccess}
