@@ -13,11 +13,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { validateDocument, type DocumentValidationResult } from "@/lib/services";
 
+import { requireAuth } from "@/lib/auth";
+
 export const Route = createFileRoute("/documents")({
-  beforeLoad: () => {
-    if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) {
-      throw redirect({ to: "/login" });
-    }
+  beforeLoad: async () => {
+    await requireAuth();
   },
   component: DocumentsPage,
 });

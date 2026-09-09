@@ -19,11 +19,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { MOCK_AGENT_EVENTS } from "@/lib/admin-services";
 
+import { requireAuth } from "@/lib/auth";
+
 export const Route = createFileRoute("/admin/agents")({
-  beforeLoad: () => {
-    if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) {
-      throw redirect({ to: "/login" });
-    }
+  beforeLoad: async () => {
+    await requireAuth();
   },
   component: AdminAgentsPage,
 });

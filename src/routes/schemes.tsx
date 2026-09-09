@@ -5,11 +5,11 @@ import { Button } from "@/components/ui/button";
 import { understandCitizenNeed, findRelevantSchemes, type SchemeMatch } from "@/lib/services";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
+import { requireAuth } from "@/lib/auth";
+
 export const Route = createFileRoute("/schemes")({
-  beforeLoad: () => {
-    if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) {
-      throw redirect({ to: "/login" });
-    }
+  beforeLoad: async () => {
+    await requireAuth();
   },
   component: SchemesPage,
 });

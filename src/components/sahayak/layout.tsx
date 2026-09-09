@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ConsentModal } from "./components";
 import { cn } from "@/lib/utils";
+import { signOut } from "@/lib/auth";
 
 const primaryNav = [
   ["Dashboard", "/dashboard", LayoutDashboard],
@@ -105,8 +106,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [consentOpen, setConsentOpen] = useState(false);
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    localStorage.removeItem("sahayak_auth");
+  const handleLogout = async () => {
+    await signOut();
     navigate({ to: "/login" });
   };
 

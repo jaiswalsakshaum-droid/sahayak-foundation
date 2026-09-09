@@ -1,0 +1,124 @@
+================================================================================
+SAHAYAK — PHASE 1 IMPLEMENTATION UPDATES SUMMARY
+Team DietCode · Build with Bharat 2.0
+================================================================================
+
+Phase 1 Objective:
+Replace mock in-memory arrays and fake localStorage auth with a real Supabase data backbone (Auth, Postgres, Storage, RLS, and Services layer), while keeping identical UI choreography and function signatures.
+
+--------------------------------------------------------------------------------
+1. PACKAGES & CONFIGURATION
+--------------------------------------------------------------------------------
+- Installed `@supabase/supabase-js` (v2.x)
+- Created `.env.example` defining:
+  - `VITE_SUPABASE_URL`
+  - `VITE_SUPABASE_ANON_KEY`
+  - `SUPABASE_SERVICE_ROLE_KEY` (optional for edge functions/admin)
+- Created `src/lib/supabase.ts`:
+  - Singleton Supabase client initialized via `import.meta.env.VITE_SUPABASE_URL` and `import.meta.env.VITE_SUPABASE_ANON_KEY`.
+  - Built-in `isSupabaseConfigured` validation with safe fallback warning if keys are not set.
+
+--------------------------------------------------------------------------------
+2. DATABASE SCHEMA, RLS & STORAGE MIGRATION
+--------------------------------------------------------------------------------
+File: `supabase/migrations/20260910000000_phase1_schema.sql`
+- Tables Created:
+  1. `profiles`: Extends `auth.users` with `role` enum ('citizen', 'admin'), full_name, phone, income, occupation, etc.
+  2. `schemes`: Catalog table (name, category, jurisdiction, benefit, description, official_source, eligibility_status).
+  3. `eligibility_rules`: Criteria rules (scheme_id, criterion_name, requirement, rule_type, evidence_source).
+  4. `document_requirements`: Documents required per scheme (scheme_id, document_type, is_mandatory).
+  5. `documents`: Uploaded citizen documents (citizen_id, document_type, file_path, status, confidence, extracted_fields JSONB).
+  6. `applications`: Citizen scheme applications (citizen_id, scheme_id, status state machine, applicant_info JSONB, tracking_id).
+  7. `application_documents`: Junction table linking applications to citizen documents.
+  8. `agent_runs`: Multi-agent run sessions (citizen_id, input_query, status).
+  9. `agent_events`: Granular multi-agent execution events (run_id, agent_name, action, details JSONB).
+  10. `audit_logs`: Evidence and execution transparency logs (run_id, agent_name, action, evidence, result).
+  11. `consent_records`: Citizen explicit data-sharing consents (citizen_id, application_id, shared_data, purpose, approved_at).
+  12. `notifications`: In-app citizen notifications (citizen_id, title, body, type, is_read).
+
+- Functions & Triggers:
+  - `handle_new_user()` trigger: Automatically creates a `profiles` row upon `auth.users` insert.
+  - `is_admin()` security definer function: Evaluates if current `auth.uid()` has `role = 'admin'`.
+
+- Row Level Security (RLS):
+  - Enabled on all 12 tables.
+  - Citizen isolation: Citizens can only select/insert/update their own data (`citizen_id = auth.uid()` or `id = auth.uid()`).
+  - Admin role bypass: Admin profile can inspect and manage all tables.
+  - Schemes/rules: Public SELECT, Admin WRITE.
+
+- Storage:
+  - `documents` bucket configured (non-public).
+  - Storage RLS policies enforce access isolation matching `storage.foldername(name)[1] = auth.uid()::text`.
+
+--------------------------------------------------------------------------------
+3. DEMO SEEDING & EDGE FUNCTION
+--------------------------------------------------------------------------------
+- Seed Script: `supabase/seed.sql`
+  - Populates 5 demo schemes:
+    1. National Means-cum-Merit Scholarship (Education)
+    2. PM-KISAN Samman Nidhi (Agriculture)
+    3. PM Awas Yojana Urban (Housing)
+    4. Atal Pension Yojana (Employment & Pension)
+    5. Sukanya Samriddhi Yojana (Women & Child)
+  - Sets up eligibility rules and mandatory document requirements for all 5 schemes.
+- Edge Function: `supabase/functions/seed-demo-data/index.ts`
+  - Re-seeds and restores the demo catalog and persona state safely via service-role key.
+
+--------------------------------------------------------------------------------
+4. AUTHENTICATION & ROUTE GUARDS REFACTOR
+--------------------------------------------------------------------------------
+- Created `src/lib/auth.ts`:
+  - `getSession()`: Retrieves real Supabase session with demo fallback.
+  - `getCurrentProfile()`: Queries `profiles` row for logged-in user.
+  - `requireAuth()`: Centralized route guard for TanStack Router `beforeLoad`.
+  - `requireAdmin()`: Centralized admin route guard verifying `profile.role === 'admin'`.
+  - `signIn(email, password)`: Real `supabase.auth.signInWithPassword` with presentation demo shortcut.
+  - `signUp(email, password, fullName, phone)`: Real `supabase.auth.signUp` passing user metadata.
+  - `signOut()`: Real `supabase.auth.signOut` and session cleanup.
+
+- Updated UI & Routes:
+  - `src/routes/login.tsx`: Wired to `signIn()`.
+  - `src/routes/signup.tsx`: Wired to `signUp()`.
+  - `src/components/sahayak/layout.tsx`: Wired to `signOut()`.
+  - Protected Routes updated with centralized `requireAuth()`:
+    - `src/routes/dashboard.tsx`
+    - `src/routes/assistant.tsx`
+    - `src/routes/schemes.tsx`
+    - `src/routes/documents.tsx`
+    - `src/routes/applications.index.tsx`
+    - `src/routes/applications.$id.tsx`
+    - `src/routes/profile.tsx`
+    - `src/routes/notifications.tsx`
+    - `src/routes/analytics.tsx`
+    - `src/routes/admin.index.tsx`
+    - `src/routes/admin.agents.tsx`
+    - `src/routes/admin.schemes.tsx`
+
+--------------------------------------------------------------------------------
+5. SERVICES LAYER MIGRATION
+--------------------------------------------------------------------------------
+- `src/lib/services.ts`:
+  - `understandCitizenNeed(query)`: Inserts persistent records into `agent_runs` and `agent_events`.
+  - `findRelevantSchemes(intent)`: Queries `schemes` with `document_requirements` relations.
+  - `checkEligibility(schemeId, citizenData)`: Evaluates against `eligibility_rules` table.
+  - `generateNextAction(eligibility)`: Returns action dynamically based on missing verification state.
+  - `validateDocument(file)`: Persists uploaded file metadata to `documents` table.
+  - `prepareApplication(schemeId)`: Reads/inserts draft records into `applications` table.
+  - `saveApplicationDraft(draft)`: Updates `applications` state in Postgres.
+  - `recordConsent(applicationId, citizenId)`: Inserts into `consent_records` table.
+  - `submitApplication(applicationId)`: Updates application status to 'submitted' with unique tracking ID.
+  - `getApplicationStatus(applicationId)`: Queries `applications` table and constructs step timeline.
+
+- `src/lib/admin-services.ts`:
+  - `getAdminMetrics()`: Real aggregate queries across `profiles`, `applications`, `documents`, `agent_runs`.
+  - `getRecentAgentEvents()`: Queries recent rows from `agent_events`.
+  - `getAdminSchemes()`: Queries `schemes` joined with `document_requirements` counts.
+
+--------------------------------------------------------------------------------
+6. VERIFICATION STATUS
+--------------------------------------------------------------------------------
+- `npm run build`: PASSED (0 errors, client & SSR production bundles generated successfully).
+- Code formatting & linting: PASSED.
+- Function signatures & route URLs: 100% preserved.
+- Ready for Phase 2: Python LangGraph + Groq LLM microservice integration.
+================================================================================

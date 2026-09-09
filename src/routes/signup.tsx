@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useState } from "react";
 
+import { signUp } from "@/lib/auth";
+
 export const Route = createFileRoute("/signup")({
   head: () => ({
     meta: [
@@ -22,20 +24,33 @@ function SignupPage() {
   const [name, setName] = useState("");
   const [mobile, setMobile] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const navigate = useNavigate();
 
-  const handleSignup = (e: React.FormEvent) => {
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError("");
     setIsLoading(true);
 
-    setTimeout(() => {
+    try {
+      const email = mobile.includes("@")
+        ? mobile
+        : `${mobile.replace(/[^0-9]/g, "")}@sahayak.local`;
+      const res = await signUp(email, password, name, mobile);
       setIsLoading(false);
-      setIsSuccess(true);
-      localStorage.setItem("sahayak_auth", "true");
-      setTimeout(() => navigate({ to: "/dashboard" }), 800);
-    }, 1000);
+
+      if (res.success) {
+        setIsSuccess(true);
+        setTimeout(() => navigate({ to: "/dashboard" }), 800);
+      } else {
+        setError(res.error || "Failed to create account.");
+      }
+    } catch (err: any) {
+      setIsLoading(false);
+      setError(err.message || "An unexpected error occurred.");
+    }
   };
 
   return (
@@ -109,6 +124,12 @@ function SignupPage() {
                     disabled={isLoading || isSuccess}
                   />
                 </label>
+                {error && (
+                  <div className="flex items-center gap-2 text-sm text-amber-700 bg-amber-100 p-2 rounded border border-amber-200">
+                    <span className="font-semibold">Notice:</span>
+                    {error}
+                  </div>
+                )}
                 {isSuccess ? (
                   <Button
                     type="button"

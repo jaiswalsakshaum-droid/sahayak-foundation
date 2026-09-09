@@ -5,6 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useState } from "react";
 
+import { signIn } from "@/lib/auth";
+
 export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
@@ -26,21 +28,24 @@ function LoginPage() {
   const [isSuccess, setIsSuccess] = useState(false);
   const navigate = useNavigate();
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setIsLoading(true);
 
-    setTimeout(() => {
+    try {
+      const res = await signIn(email, password);
       setIsLoading(false);
-      if (email === "4321" && password === "1234") {
+      if (res.success) {
         setIsSuccess(true);
-        localStorage.setItem("sahayak_auth", "true");
-        setTimeout(() => navigate({ to: "/dashboard" }), 800);
+        setTimeout(() => navigate({ to: "/dashboard" }), 600);
       } else {
-        setError("Invalid credentials. Try 4321 / 1234");
+        setError(res.error || "Invalid credentials. Try 4321 / 1234");
       }
-    }, 1000);
+    } catch (err: any) {
+      setIsLoading(false);
+      setError(err.message || "An unexpected error occurred.");
+    }
   };
 
   return (

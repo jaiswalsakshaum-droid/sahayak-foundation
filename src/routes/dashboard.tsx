@@ -14,6 +14,8 @@ import { applications, activity, notifications } from "@/lib/mock-data";
 import { NotificationCard } from "@/components/sahayak";
 import { AppShell } from "@/components/sahayak";
 
+import { requireAuth } from "@/lib/auth";
+
 export const Route = createFileRoute("/dashboard")({
   head: () => ({
     meta: [
@@ -24,10 +26,8 @@ export const Route = createFileRoute("/dashboard")({
       },
     ],
   }),
-  beforeLoad: () => {
-    if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) {
-      throw redirect({ to: "/login" });
-    }
+  beforeLoad: async () => {
+    await requireAuth();
   },
   component: DashboardPage,
 });

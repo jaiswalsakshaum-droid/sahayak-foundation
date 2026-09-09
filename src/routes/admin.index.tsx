@@ -18,11 +18,11 @@ import {
 import { Users, FileText, CheckCircle, Clock, Activity, Shield } from "lucide-react";
 import { MOCK_ADMIN_METRICS } from "@/lib/admin-services";
 
+import { requireAuth } from "@/lib/auth";
+
 export const Route = createFileRoute("/admin/")({
-  beforeLoad: () => {
-    if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) {
-      throw redirect({ to: "/login" });
-    }
+  beforeLoad: async () => {
+    await requireAuth();
   },
   component: AdminDashboard,
 });

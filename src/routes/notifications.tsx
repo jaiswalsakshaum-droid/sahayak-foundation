@@ -10,11 +10,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 
+import { requireAuth } from "@/lib/auth";
+
 export const Route = createFileRoute("/notifications")({
-  beforeLoad: () => {
-    if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) {
-      throw redirect({ to: "/login" });
-    }
+  beforeLoad: async () => {
+    await requireAuth();
   },
   component: NotificationsPage,
 });

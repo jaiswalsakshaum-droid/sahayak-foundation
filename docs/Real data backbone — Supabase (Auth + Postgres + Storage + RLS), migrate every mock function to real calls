@@ -1,0 +1,367 @@
+# Sahayak — Roadmap, Pitch Readiness & Phase 1 Implementation Plan
+
+**Team DietCode · Build with Bharat 2.0**
+Prepared: September 2026
+
+---
+
+## Part A — Where the project actually stands right now
+
+I read the full repo (gitingest) and cross-checked it against your pitch deck. Here's the honest picture.
+
+### What's genuinely built and good
+- A **complete, polished React + TypeScript + Vite (TanStack Start) frontend** — not a wireframe. Every route in your brief exists and renders: `/`, `/demo`, `/login`, `/signup`, `/dashboard`, `/assistant`, `/schemes`, `/schemes/:id`, `/documents`, `/applications`, `/applications/:id`, `/profile`, `/notifications`, and the full `/admin`, `/admin/agents`, `/admin/schemes`, `/admin/analytics` suite.
+- A real **shadcn/ui design system** (40+ components) with a restrained civic-tech visual language matching your brief — no glassmorphism, no gradient soup.
+- Reusable domain components (`AgentCard`, `StatusBadge`, `SchemeCard`, `ApplicationTimeline`, etc.) — this is exactly the scaffolding a real integration needs.
+- **Data shapes are already Supabase-shaped.** `src/lib/admin-services.ts` literally has the comment "Supabase-compatible data models" and defines `Scheme`, `EligibilityRule`, `DocumentRequirement`, `AgentRun`, `AgentEvent`, `AuditLog`, `ConsentRecord` types that map almost 1:1 to Postgres tables. Whoever scaffolded this (Lovable) planned ahead — you're not starting from zero on schema design.
+- The `/assistant` page already **simulates** the exact multi-agent handoff sequence from your "Flow of Solution" slide (Citizen → Scheme → Eligibility → Document → Application agent) using `setTimeout`-staged messages. This is a huge head start: the UI choreography for the "wow" moment already exists, it just needs to be driven by real events instead of fake timers.
+
+### What's not real yet (and this is the gap between your deck and your repo)
+- **No backend at all.** No Supabase client, no API calls, no `fetch` to any real service.
+- **No real auth.** Login/signup just does `localStorage.setItem("sahayak_auth", "true")`. Anyone can "log in" with anything.
+- **No real AI.** `src/lib/services.ts` functions like `understandCitizenNeed`, `checkEligibility`, `validateDocument` are keyword-matching + `await sleep(N)` — there is no LLM call anywhere in the codebase.
+- **No LangGraph, no Python backend, no Groq, no OCR, no RAG, no pgvector** — despite these being named in your pitch deck's "Tech Stack" slide. Right now the deck is describing the *target* architecture, not the *built* one. That's completely normal for a hackathon at this stage, but judges who click through the live app vs. the deck will notice the gap if it's not closed before finals.
+- **Minor deck/repo mismatch to fix before final pitch:** your deck says "Frontend: Next.js" — the repo is actually **Vite + TanStack Start**, not Next.js. Small thing, but a judge who asks "why Next.js" and gets a confused answer looks worse than just fixing the slide.
+
+**Bottom line:** you have an unusually strong, demo-ready UI shell. The entire remaining challenge is wiring three things into it: (1) a real database + auth, (2) a real multi-agent LLM backend, (3) real document handling. That's genuinely a well-scoped, finishable problem for the time you likely have left — which is why I'm keeping the roadmap to four phases, not eight.
+
+---
+
+## Part B — Future phases (kept deliberately small)
+
+Four phases. Each one should leave you with something that *works end-to-end*, so if you run out of time after any phase, you still have a demoable product.
+
+### Phase 1 — Real data backbone (Supabase: Auth + Postgres + Storage + RLS)
+Replace every mock function in `services.ts`/`admin-services.ts` with real Supabase calls. Real signup/login. Real persisted schemes, applications, documents, audit logs. The UI barely changes — you're swapping the engine under the hood. **This is the next phase, detailed in full in Part E below.**
+
+### Phase 2 — The real AI workforce (LangGraph on Render, calling Groq)
+Build the actual multi-agent orchestrator in Python (LangGraph + LangChain) as a standalone service hosted on Render. It exposes one endpoint (`POST /run`) that takes a citizen query + profile and streams back agent-by-agent events (`agent_started`, `agent_message`, `agent_done`, `handoff`) that map directly onto the `AgentEvent` type you already defined. A Supabase Edge Function acts as the secure proxy between your frontend and Render (so your Groq key and Render URL never touch the browser), and either relays the stream or writes events into `agent_events` which the frontend subscribes to via **Supabase Realtime**. The `/assistant` page's `setTimeout` choreography gets replaced with real streamed state — visually it can look almost identical, which is good: you already validated that UX with judges/mentors mentally, now it's just true.
+
+### Phase 3 — Document intelligence + live orchestration polish
+Real document upload to Supabase Storage, real extraction (Groq vision model or an OCR step) feeding into `checkEligibility`, and tightening the Realtime pipe so `/admin/agents` shows a genuinely live multi-citizen agent feed — this is your single best "technical depth" demo moment for judges, so it's worth a dedicated phase rather than bolting it onto Phase 2 under time pressure.
+
+### Phase 4 — Pitch hardening & deployment
+Seed script for the exact demo persona (Rahul Sharma) so every demo run is reproducible, `/admin/analytics` wired to real aggregate queries instead of `MOCK_ADMIN_METRICS`, an audited pass over every empty/loading/error state, a pre-recorded backup demo video (Groq/Render can hiccup live — never bet a final on live network calls alone), and rehearsal of the judge Q&A story (see Part C).
+
+---
+
+## Part C — Making it presentable for the final pitch
+
+Judges at this stage are triangulating three things: **does it actually work live**, **is it different from "yet another chatbot / yet another myScheme clone"**, and **do you understand what you built**. Your deck's competitor table (myScheme / UMANG / DigiLocker vs. Sahayak) is a strong asset — keep it, but make sure the live demo *proves* the two rows you win on hardest: "Multi-agent workflow" and "Human approval controls."
+
+**Demo script that sells the differentiation, not just the UI:**
+1. Open `/assistant` as Rahul Sharma, type a need in natural language (bonus: type it partly in Hindi/Hinglish, since "multilingual" is on your USP slide — even a partial demo of this is memorable).
+2. Let the agent handoff sequence play — narrate *why* each agent exists ("Scheme Agent doesn't decide eligibility, it just retrieves candidates — that's a separate agent, on purpose, for auditability").
+3. Hit the missing-document moment and show the **human approval gate** before final submission — this is your strongest "not a chatbot" beat, say the line from your deck out loud: citizen controls final submission, not the AI.
+4. Cut to `/admin/agents` and show the live event feed / audit log — this is the "we built real infrastructure, not a demo script" moment. Judges remember the admin view more than the citizen view because it's the part competitors can't fake with a nice UI.
+5. Close on `/admin/analytics` with real numbers if Phase 4 is done, otherwise be upfront that metrics are illustrative at hackathon scale.
+
+**Practical pitch hygiene:**
+- Fix the Next.js → Vite/TanStack Start line in the tech stack slide before finals.
+- Have the backup video ready and rehearsed as a fallback, not an afterthought — say so confidently if you need to switch to it, judges respect risk management more than a crash.
+- Keep the "AI can / Citizen controls" split from your landing page visible somewhere in the pitch — it's your clearest one-sentence differentiator and it's already well-written.
+
+---
+
+## Part D — LLM choice: Groq models, checked as of today (Sept 2026)
+
+You asked me to check current Groq models rather than assume from memory — good instinct, this catalog moves fast. Key facts as of now:
+
+- Groq **deprecated `llama-3.3-70b-versatile` and `llama-3.1-8b-instant`** — Groq's own docs list an Aug 16, 2026 shutdown for these, so **do not build on them**, even though most tutorials online still reference them.
+- Current recommended replacements: **`openai/gpt-oss-120b`** (strong reasoning + tool calling, replaces 70B-class usage) and **`openai/gpt-oss-20b`** (fast/cheap, replaces 8B-class usage).
+- Also available: `meta-llama/llama-4-maverick-17b-128e-instruct` (vision-capable), `qwen/qwen3.6-27b` (multimodal, marked preview — fine for a hackathon demo, not for anything you'd call production), and `compound-beta` / `compound-beta-mini` — Groq's own hybrid models with **built-in web search and code execution tools**, free tier, which could save you from building a custom retrieval tool for the Scheme Agent if you want a shortcut.
+- **Free tier:** no credit card required, full model catalog, rate-limited (roughly 30 requests/minute per model, org-wide — multiple API keys don't raise this). That's genuinely workable for a live hackathon demo with a handful of judges hitting it, but it means you should **not** hammer it during dev/testing with the same key you'll demo with, and you should implement basic retry/backoff (Groq returns `429` with a `retry-after` header).
+
+**Recommendation for Sahayak's agent roles:**
+| Agent | Model | Why |
+|---|---|---|
+| Citizen Agent (intent understanding) | `openai/gpt-oss-20b` | Fast, cheap, task is simple extraction/classification |
+| Scheme Agent (retrieval + ranking) | `openai/gpt-oss-120b` or `compound-beta` | Needs reasoning over multiple candidates; `compound-beta` if you want free built-in search |
+| Eligibility Agent (rule evaluation + explanation) | `openai/gpt-oss-120b` | This is your "evidence-backed" differentiator — needs the stronger model to write correct, well-justified explanations |
+| Document Agent (field extraction) | `qwen/qwen3.6-27b` (vision) or an OCR library + `openai/gpt-oss-20b` for structuring | Vision model if you want true image understanding; classic OCR (Tesseract) + LLM structuring is the safer fallback if the vision model proves flaky mid-hackathon |
+| Application Agent (draft assembly) | `openai/gpt-oss-20b` | Mostly templating verified data, doesn't need heavy reasoning |
+
+Store the model ID as an environment variable per agent, not hardcoded — Groq's catalog will keep shifting and you don't want a repeat of the 70B deprecation mid-hackathon.
+
+---
+
+## Part E — In-depth Phase 1 implementation plan
+
+This is the plan to hand to your coding agent. Phase 1's job: **make the app real, without changing what it looks like.** Every route should still work exactly as it does today, but backed by an actual database and actual auth instead of mock arrays and `localStorage`.
+
+### E.1 Goals & definition of done
+- A real Supabase project exists with a complete schema matching the domain types already defined in the codebase.
+- Signup/login uses real Supabase Auth (email + password is enough; don't over-build this).
+- Route guards (`beforeLoad` checks currently reading `localStorage.getItem("sahayak_auth")`) check a real Supabase session instead.
+- Every function currently exported from `src/lib/services.ts` and `src/lib/admin-services.ts` reads/writes real Supabase tables, with the **same function signatures** so route components need minimal changes.
+- Row Level Security is enabled and correct: a citizen can only ever see their own rows; an admin role can see everything.
+- A seed script reliably recreates the Rahul Sharma demo scenario (profile, 5 schemes, one in-progress application with a missing document) so every demo run starts from the same known-good state.
+- **Phase 1 explicitly does not include real LLM calls.** `understandCitizenNeed`, `checkEligibility` etc. can keep their current mock/keyword logic for now — only their *data persistence* becomes real (e.g., a `checkEligibility` call should write a real row to `applications`/`agent_events` even though the eligibility logic itself is still simple). This keeps Phase 1 scoped and testable independent of Phase 2's Python/Groq work landing.
+
+### E.2 Architecture for this phase
+```
+React (TanStack Start, Vite)
+   │  @supabase/supabase-js  (anon key, browser-safe)
+   ▼
+Supabase
+   ├── Auth            → citizens table auto-linked via auth.users trigger
+   ├── Postgres         → schemes, eligibility_rules, document_requirements,
+   │                       applications, application_documents, documents,
+   │                       agent_runs, agent_events, audit_logs,
+   │                       consent_records, notifications
+   ├── Storage           → 'documents' bucket, RLS-scoped per citizen
+   ├── Row Level Security → citizen isolation + admin role bypass
+   └── Edge Functions    → only where secrets/service-role are needed
+                            (Phase 1 needs exactly one: seed-demo-data)
+```
+No Python, no Render, no Groq key touches this phase. That all arrives in Phase 2, when the Edge Function layer becomes the secure bridge to the Render-hosted LangGraph service.
+
+### E.3 Supabase project setup
+1. Create a new Supabase project (free tier is fine for a hackathon). Note the project URL and anon key.
+2. Install the client: `npm i @supabase/supabase-js`.
+3. Add env vars: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`. Since this is a TanStack Start app with SSR, confirm these are exposed client-side correctly (Vite requires the `VITE_` prefix for browser exposure — double check nothing server-only leaks the service role key into the client bundle).
+4. Create `src/lib/supabase.ts` exporting a single client singleton, used everywhere instead of ad-hoc instantiation.
+5. Enable email/password auth in the Supabase dashboard. Disable email confirmation for the hackathon demo (or you'll be stuck waiting on emails mid-pitch) — turn it back on later if this ever becomes real.
+
+### E.4 Database schema (run as a SQL migration in the Supabase SQL editor)
+
+```sql
+-- Citizens (extends auth.users)
+create table public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  full_name text not null,
+  age int,
+  location text,
+  occupation text,
+  annual_income numeric,
+  phone text,
+  role text not null default 'citizen' check (role in ('citizen','admin')),
+  created_at timestamptz not null default now()
+);
+
+-- Schemes catalog
+create table public.schemes (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  category text not null,
+  jurisdiction text not null check (jurisdiction in ('Central','State')),
+  benefit text,
+  description text,
+  official_source text,
+  eligibility_status text not null default 'Active' check (eligibility_status in ('Active','Draft','Archived')),
+  last_verified timestamptz default now(),
+  created_at timestamptz not null default now()
+);
+
+create table public.eligibility_rules (
+  id uuid primary key default gen_random_uuid(),
+  scheme_id uuid not null references public.schemes(id) on delete cascade,
+  criterion_name text not null,
+  requirement text not null,
+  rule_type text not null check (rule_type in ('numeric','boolean','enum','text')),
+  evidence_source text
+);
+
+create table public.document_requirements (
+  id uuid primary key default gen_random_uuid(),
+  scheme_id uuid not null references public.schemes(id) on delete cascade,
+  document_type text not null,
+  is_mandatory boolean not null default true
+);
+
+-- Citizen documents
+create table public.documents (
+  id uuid primary key default gen_random_uuid(),
+  citizen_id uuid not null references public.profiles(id) on delete cascade,
+  document_type text not null,
+  file_path text,                      -- Storage object path
+  status text not null default 'pending' check (status in ('pending','verified','needs_review','rejected')),
+  confidence numeric,
+  extracted_fields jsonb,
+  uploaded_at timestamptz not null default now()
+);
+
+-- Applications
+create table public.applications (
+  id uuid primary key default gen_random_uuid(),
+  citizen_id uuid not null references public.profiles(id) on delete cascade,
+  scheme_id uuid not null references public.schemes(id),
+  status text not null default 'draft'
+    check (status in ('draft','awaiting_approval','submitted','under_review','approved','rejected')),
+  applicant_info jsonb,
+  tracking_id text unique,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table public.application_documents (
+  application_id uuid references public.applications(id) on delete cascade,
+  document_id uuid references public.documents(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending','verified','needs_review')),
+  primary key (application_id, document_id)
+);
+
+-- Agent orchestration (Phase 2 will populate these for real)
+create table public.agent_runs (
+  id uuid primary key default gen_random_uuid(),
+  citizen_id uuid not null references public.profiles(id) on delete cascade,
+  input_query text,
+  status text not null default 'PROCESSING'
+    check (status in ('ONLINE','PROCESSING','WAITING','ACTION REQUIRED','COMPLETED')),
+  started_at timestamptz not null default now(),
+  completed_at timestamptz
+);
+
+create table public.agent_events (
+  id uuid primary key default gen_random_uuid(),
+  run_id uuid not null references public.agent_runs(id) on delete cascade,
+  agent_name text not null,
+  action text not null,
+  details jsonb,
+  created_at timestamptz not null default now()
+);
+
+create table public.audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  run_id uuid references public.agent_runs(id) on delete set null,
+  agent_name text not null,
+  action text not null,
+  evidence text,
+  result text,
+  created_at timestamptz not null default now()
+);
+
+create table public.consent_records (
+  id uuid primary key default gen_random_uuid(),
+  citizen_id uuid not null references public.profiles(id) on delete cascade,
+  application_id uuid references public.applications(id) on delete cascade,
+  shared_data text[],
+  purpose text,
+  approved_at timestamptz not null default now()
+);
+
+create table public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  citizen_id uuid not null references public.profiles(id) on delete cascade,
+  title text not null,
+  body text,
+  type text default 'info',
+  is_read boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+-- Auto-create a profile row whenever a new auth user signs up
+create function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, full_name)
+  values (new.id, coalesce(new.raw_user_meta_data->>'full_name', 'New Citizen'));
+  return new;
+end;
+$$ language plpgsql security definer;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+```
+
+### E.5 Row Level Security policies
+Enable RLS on every table above (`alter table X enable row level security;`), then:
+
+```sql
+-- Helper: is the current user an admin?
+create function public.is_admin() returns boolean as $$
+  select exists (select 1 from public.profiles where id = auth.uid() and role = 'admin');
+$$ language sql stable security definer;
+
+-- Profiles: citizens see only themselves; admins see all
+create policy "own profile" on public.profiles for select using (id = auth.uid() or public.is_admin());
+create policy "update own profile" on public.profiles for update using (id = auth.uid());
+
+-- Schemes / eligibility_rules / document_requirements: publicly readable (not sensitive), admin-writable
+create policy "schemes readable" on public.schemes for select using (true);
+create policy "schemes admin write" on public.schemes for all using (public.is_admin());
+-- (repeat the readable/admin-write pair for eligibility_rules and document_requirements)
+
+-- Citizen-owned tables: isolate by citizen_id, admin bypass
+create policy "own documents" on public.documents for all using (citizen_id = auth.uid() or public.is_admin());
+create policy "own applications" on public.applications for all using (citizen_id = auth.uid() or public.is_admin());
+create policy "own agent_runs" on public.agent_runs for all using (citizen_id = auth.uid() or public.is_admin());
+create policy "own notifications" on public.notifications for all using (citizen_id = auth.uid() or public.is_admin());
+create policy "own consent" on public.consent_records for all using (citizen_id = auth.uid() or public.is_admin());
+
+-- agent_events / audit_logs: readable if you own the parent run, or you're admin
+create policy "agent_events via run" on public.agent_events for select
+  using (exists (select 1 from public.agent_runs r where r.id = run_id and (r.citizen_id = auth.uid() or public.is_admin())));
+create policy "audit_logs via run" on public.audit_logs for select
+  using (public.is_admin() or exists (select 1 from public.agent_runs r where r.id = run_id and r.citizen_id = auth.uid()));
+```
+
+Test this explicitly (see E.9) — RLS mistakes are the #1 way hackathon demos break live ("why can't Rahul see his own application?").
+
+### E.6 Storage
+- Create a `documents` bucket, **not public**.
+- Storage policy: a citizen can upload/read/delete only under a path prefixed with their own `auth.uid()`, e.g. `documents/{citizen_id}/{filename}`. Enforce this via a Storage RLS policy matching `storage.foldername(name)[1] = auth.uid()::text`.
+- Store the resulting path in `documents.file_path`; generate signed URLs on read rather than making the bucket public.
+
+### E.7 Auth wiring in the app
+1. Replace the fake login (`localStorage.setItem("sahayak_auth", "true")`) in `src/routes/login.tsx` and `src/routes/signup.tsx` with real `supabase.auth.signInWithPassword` / `supabase.auth.signUp`.
+2. Replace every route's
+   ```ts
+   if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) throw redirect({ to: "/login" });
+   ```
+   with a check against `supabase.auth.getSession()`. Centralize this into one `requireAuth()` helper used by every protected route's `beforeLoad`, rather than repeating the pattern nine times as it is today — this is a good refactor to bundle into this phase since you're touching every one of these files anyway.
+3. Logout (`src/components/sahayak/layout.tsx`, currently `localStorage.removeItem("sahayak_auth")`) becomes `supabase.auth.signOut()`.
+4. Add a simple admin check for `/admin/*` routes using the `profiles.role` column, not just "is logged in."
+
+### E.8 Migrating `services.ts` and `admin-services.ts`
+Go function by function. Keep signatures stable so route components barely change.
+
+| Function | Phase 1 change |
+|---|---|
+| `understandCitizenNeed` | Keep mock logic; but now also `insert` into `agent_runs` + `agent_events` so the run is persisted (Phase 2 will later make the logic real, not just the persistence) |
+| `findRelevantSchemes` | Replace `MOCK_SCHEMES_DB` array with `supabase.from('schemes').select()`, filtered by category |
+| `checkEligibility` | Replace hardcoded criteria with a real join against `eligibility_rules` for the given `schemeId`; still simple comparison logic, no LLM yet |
+| `generateNextAction` | Same logic, but read from real `applications`/`documents` state instead of the passed-in mock object |
+| `validateDocument` | Keep mock OCR result for now (Phase 3 makes this real), but `insert` a real row into `documents` |
+| `prepareApplication` / `saveApplicationDraft` | Real `insert`/`update` into `applications` |
+| `recordConsent` | Real `insert` into `consent_records` |
+| `submitApplication` | Real `update` of `applications.status`, generate a real `tracking_id` |
+| `getApplicationStatus` | Real `select` from `applications` + a derived timeline (can still be computed client-side from `status`, no need to over-engineer a timeline table yet) |
+| `MOCK_ADMIN_METRICS`, `MOCK_AGENT_EVENTS`, `MOCK_SCHEMES_DATA` in `admin-services.ts` | Replace with real aggregate queries (`count()`, `select` with joins) against the tables above |
+
+Wrap all of these in TanStack Query hooks (`useQuery`/`useMutation`) rather than calling Supabase directly inside components — the codebase already has `@tanstack/react-query` as a dependency, so this is idiomatic, not a new pattern.
+
+### E.9 The one Edge Function needed this phase: `seed-demo-data`
+Everything else in Phase 1 can be done with the anon-key client directly (RLS makes this safe). The one exception: seeding demo data needs to bypass RLS to create schemes/rules/the Rahul Sharma profile in one shot, which needs the **service role key** — and that key must never reach the browser. So:
+- Write one Supabase Edge Function (`supabase/functions/seed-demo-data/index.ts`) using the service-role client, callable only by an admin, that: creates the 5 demo schemes + their rules + doc requirements (mirroring what's currently in `MOCK_SCHEMES_DB`/`MOCK_SCHEMES_DATA`), creates/upserts the Rahul Sharma citizen profile, and creates one in-progress application with a missing enrollment certificate — i.e., the exact state your `/assistant` demo currently simulates.
+- Trigger it from a hidden `/admin` button or a one-off `curl` call before each demo/rehearsal. This is what makes your demo **reproducible** — huge for pitch day nerves.
+
+### E.10 Task breakdown (rough order, for your coding agent to execute sequentially)
+1. Supabase project + env vars + `supabase.ts` client singleton.
+2. Run the schema migration (E.4) + RLS policies (E.5) + Storage bucket/policy (E.6).
+3. Wire real auth (E.7) — signup, login, logout, centralized `requireAuth()`, admin role check.
+4. Migrate `services.ts` functions one at a time (E.8), each with a manual smoke test in the actual UI before moving to the next.
+5. Migrate `admin-services.ts` the same way.
+6. Write and deploy the `seed-demo-data` Edge Function (E.9).
+7. Run the full RLS test pass (E.11).
+8. Re-run your entire route list manually as a logged-in citizen and separately as an admin, confirming no page silently falls back to stale mock data.
+
+### E.11 Testing / acceptance checklist before calling Phase 1 done
+- [ ] Sign up a new citizen, confirm a `profiles` row is auto-created via the trigger.
+- [ ] Log in as that citizen, confirm they see **zero** schemes/applications belonging to anyone else.
+- [ ] Log in as a second citizen, confirm the first citizen's data is invisible to them (this is the RLS test that actually matters).
+- [ ] Log in as an admin, confirm `/admin/*` shows aggregate data across all citizens.
+- [ ] Upload a document, confirm the file lands under `documents/{uid}/...` in Storage and is not publicly fetchable without a signed URL.
+- [ ] Run `seed-demo-data`, then walk through `/dashboard` → `/assistant` → `/applications/:id` as Rahul Sharma and confirm every number on screen (3 benefits discovered, 2 in progress, 5/6 documents, etc.) is now coming from a real query, not a hardcoded constant.
+- [ ] Kill the network tab, refresh — confirm the app gracefully shows a loading/error state rather than a blank screen (this was already a design requirement in your original brief; don't regress it while ripping out mocks).
+
+### E.12 What to explicitly *not* do in Phase 1 (scope discipline)
+- Don't start the LangGraph/Render/Groq work yet — it depends on Phase 1's schema being stable, and mixing the two risks neither being finished in time.
+- Don't build a custom admin role management UI — a manual `update profiles set role='admin' where id=...` in the SQL editor is fine for a hackathon.
+- Don't add phone/OTP auth or social login — email/password is sufficient and every hour spent on this is an hour not spent on the actual differentiator (the agent workforce).
+- Don't rebuild the eligibility *logic* to be smarter yet — that's explicitly Phase 2's job once Groq is wired in. Phase 1 eligibility should be "the same simple comparison as today, just against real rows."
+
+---
+
+Once Phase 1 is solid and demoable end-to-end (even with the still-simple eligibility logic), you'll be in a strong position to hand me the go-ahead for an equally in-depth Phase 2 plan covering the LangGraph agent graph design, the Render deployment, and the Supabase Edge Function proxy that connects them securely.

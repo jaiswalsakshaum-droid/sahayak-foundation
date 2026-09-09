@@ -12,19 +12,17 @@ import {
   ClipboardCheck,
   FileCheck2,
   Loader2,
-  ArrowDown,
   Send,
   FileWarning,
   Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { requireAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/assistant")({
-  beforeLoad: () => {
-    if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) {
-      throw redirect({ to: "/login" });
-    }
+  beforeLoad: async () => {
+    await requireAuth();
   },
   component: AssistantPage,
 });

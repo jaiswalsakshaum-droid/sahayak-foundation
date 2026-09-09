@@ -16,12 +16,11 @@ import {
   Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { requireAuth } from "@/lib/auth";
 
 export const Route = createFileRoute("/applications/$id")({
-  beforeLoad: () => {
-    if (typeof window !== "undefined" && !localStorage.getItem("sahayak_auth")) {
-      throw redirect({ to: "/login" });
-    }
+  beforeLoad: async () => {
+    await requireAuth();
   },
   component: ApplicationDetailPage,
 });
