@@ -1,0 +1,535 @@
+RECHECK AND REDO EVERYTHING NOTHING IS WORKING
+
+# Sahayak — Phase 3 Audit, Remaining Roadmap & Phase 4 Implementation Plan (Close the AI Loop)
+
+**Team DietCode · Build with Bharat 2.0**
+Prepared: September 2026
+
+---
+
+## How I did this audit
+
+You gave me the full repo, not just the three plan documents in `docs/`. So instead of auditing "did you follow the plan," I traced the **actual current code** for every claim in the Phase 1 and Phase 2 audits, and for everything the Phase 3 plan asked for. That matters because it changes the picture: **the Phase 3 plan document exists, but almost none of Phase 3's actual coding work has landed.** What you have right now is a repo that's still sitting at "Phase 2, partially debugged" — a few of the Phase-1-audit and Phase-2-audit fixes went in, the core Phase 3 deliverable (real eligibility + real document intelligence) did not. This isn't a criticism of the plan — the plan was right — it's just important you know exactly where the code actually is before your coding agent starts Phase 4, so Phase 4 is scoped correctly (it needs to absorb Phase 3's undone work, not assume it's done).
+
+---
+
+## Part 0 — Full audit: Phase 1 fixes, Phase 2 bugs, Phase 3 promises — verified against actual code
+
+### Scorecard
+
+| # | Item | Source | Status in current code | Evidence |
+|---|---|---|---|---|
+| 1 | Demo login shortcut bypasses real Supabase session | P1 audit #1 | ✅ **Fixed** | `src/lib/auth.ts` now gates the hardcoded-credential branch behind `!isSupabaseConfigured`, and when Supabase *is* configured, `4321`/`admin` map to real `rahul@sahayak.demo` / `admin@sahayak.demo` accounts via `signInWithPassword`, auto-provisioning via `signUp` on first use. |
+| 2 | `seed-demo-data` doesn't seed the demo scenario | P1 audit #2 | 🟡 **Half-fixed** | The Edge Function now upserts schemes **and** `eligibility_rules` **and** `document_requirements` (an improvement — Phase 1's version only did schemes). It still **never creates the Rahul Sharma `profiles` row, never creates the in-progress `applications` row, and never creates the missing-enrollment-certificate `documents` row.** Your `/dashboard` and `/assistant` demo narrative still depends on data this function doesn't produce. |
+| 3 | `getApplicationStatus()` hardcoded, ignores its own argument | P1 audit #3 | ✅ **Fixed** | `src/lib/services.ts` now does a real `select` on `applications` by `tracking_id`/`id` and derives the six-step timeline from the real `status` column. |
+| 4 | Document upload never touches Storage | P1 audit #4 | ✅ **Fixed** | `validateDocument()` now uploads real `File`/`Blob` objects to `documents/{uid}/...` via `supabase.storage.from("documents").upload()` before inserting the metadata row. |
+| 5 | `prepareApplication()` upsert has no conflict key / no unique constraint | P1 audit #5 | ✅ **Fixed** | Migration now has `constraint uq_citizen_scheme unique (citizen_id, scheme_id)`, and `prepareApplication()` does a real select-before-insert check against it. |
+| 6 | `audit_logs` insert policy is `with check (true)` — anyone can write fake audit rows | P1 audit #6 | ✅ **Fixed** | Migration's `audit_logs_insert_admin_or_system` policy now requires `is_admin()` or `auth.jwt()->>'role' = 'service_role'`. Client-side forgery is closed. |
+| 7 | `/analytics` only requires login, not admin role | P1 audit #7 | ✅ **Fixed** | `src/routes/analytics.tsx` now calls `requireAdmin()`. (Small aside: `src/routes/admin.index.tsx` still calls plain `requireAuth()`, not `requireAdmin()` — same class of bug, smaller blast radius since it's the admin *landing* page, but worth a one-line fix while you're in this file for Phase 4.) |
+| 8 | Real Supabase service-role key committed to `backend/.env.example` | P2 audit #1 | ✅ **Fixed** | Current `backend/.env.example` only has placeholder text (`your-service-role-key-here`). If the original exposure happened, the key still needs to be confirmed rotated in the Supabase dashboard if that hasn't already been done — I can't verify that part from a repo snapshot. |
+| 9 | Backend won't boot on Render — import path mismatch | P2 audit #2 | 🔴 **Still broken** | `backend/app.py` still does `from backend.agent_graph import ...` and `backend/agent_graph.py` still does `from backend.state import ...`. `render.yaml` still runs `uvicorn app:app` and the `Dockerfile` still `COPY`s the `backend/` folder's *contents* into `/app` and runs `uvicorn app:app` from there. Neither deployment path has a `backend` package reachable from the working directory. **This will crash on startup with `ModuleNotFoundError: No module named 'backend'` the moment you actually deploy it**, which per the Phase 2 audit was already flagged and still hasn't been touched. |
+| 10 | Internal-secret check on `/run` is inverted (unauthenticated) | P2 audit #3 | 🔴 **Still broken** | `backend/app.py`: `if INTERNAL_SECRET and x_sahayak_internal_secret: if x_sahayak_internal_secret != INTERNAL_SECRET: raise 403`. A request with **no header at all** skips the whole check and is accepted. Same bug, same file, unchanged. The hardcoded fallback secret (`"sahayak-internal-secret-2026"`) is also still there. |
+| 11 | Edge Function silently impersonates the demo citizen on auth failure | P2 audit #4 | 🔴 **Still broken** | `supabase/functions/orchestrate-agent-run/index.ts` still defaults `citizenId` to the Rahul Sharma UUID and only overwrites it *if* a valid `Authorization` header parses — it never rejects a missing/invalid one. |
+| 12 | `eligibility_agent_node` / `document_agent_node` never call Groq — rubber-stamp / hardcoded | P2 audit "high priority" | 🔴 **Still broken, unchanged, this is the core issue** | `backend/agent_graph.py`: `eligibility_agent_node` still branches on `"enrollment" in criterion_name.lower()` / `"income" in criterion_name.lower()` and never parses the actual `requirement` string or compares it numerically. `document_agent_node` still does `missing_docs = ["Enrollment Certificate"]` unconditionally — it doesn't query `document_requirements` or `documents` at all, for any scheme, any citizen, ever. This is precisely what the Phase 3 plan was written to fix, and it hasn't been touched. |
+| 13 | `.maybeSingle()` wrong method name, silently swallowed | P2 audit #5 | 🟡 **Fixed in one file, not the other** | `backend/document_extractor.py` correctly uses `.maybe_single()`. But **`backend/app.py` still has `.maybeSingle()`** in `run_langgraph_task()` — this will throw `AttributeError`, get caught by the bare `except`, and **silently fall back to the hardcoded Rahul Sharma profile for every citizen, every run**, exactly as originally flagged. This is a live, unresolved bug, not a historical one. |
+| 14 | Pydantic schemas defined but never validated against | P2 audit #6 | 🔴 **Still unresolved** | `backend/state.py`'s `NeedIntent`, `SchemeRankingResult`, `EligibilityResult`, `DocumentRequirementCheck` are all still unused. `call_groq_json_with_retry()` still returns a raw `json.loads()` dict with no schema validation anywhere in `agent_graph.py`. |
+| 15 | `use-agent-run.ts` silent-failure, no timeout, status inferred from agent-name string matching | P2 audit #7, #8 | 🔴 **Still unresolved** | Same file, same pattern: `startRun()`'s catch block only `console.warn`s, `activeAgentIndex`/`status` are still derived by checking whether `agent_name.toLowerCase().includes("document")` etc., not by reading `agent_runs.status`. |
+| 16 | CORS wildcard + credentials, fragile `"429" in str(e)` matching, fixed backoff instead of `retry-after` | P2 audit minor items | 🔴 **Unchanged** | Still present as originally found. Low priority, listed for completeness. |
+| 17 | Document Storage upload → real extraction pipeline (Phase 3's core deliverable) | P3 plan | 🟠 **Half-scaffolded, not wired** | `backend/document_extractor.py` exists and is a genuinely reasonable first draft: it downloads from Storage, calls a Groq vision model with a structured-output prompt, and has a plausible (if fake-data) fallback. **But it is dead code — nothing calls `extract_document_data()`. There is no `/extract-document` endpoint in `app.py`, no `extract-document` Supabase Edge Function, and `documents.tsx` never triggers it.** Uploading a real document today still only writes fake extracted fields from `validateDocument()` in the frontend; the real extraction module you already wrote never runs. |
+| 18 | Vision model choice | P3 plan / your own instruction to check current models | 🟠 **Stale model ID** | `document_extractor.py` defaults `MODEL_VISION` to `"llama-3.2-11b-vision-preview"`. I checked Groq's live model catalog (`console.groq.com/docs/models`, Sept 2026) — **this model ID no longer exists on Groq's current catalog at all** (see Part C). The vision-capable model available today is `qwen/qwen3.6-27b`. This needs updating regardless of whether Phase 3's wiring gets finished, because it will 404/fail against Groq as soon as it's ever called. |
+| 19 | `document_requirements`/`eligibility_rules` real query wiring in the graph | P3 plan | 🔴 **Not started** | Both nodes still ignore these tables entirely (see #12). |
+| 20 | `/admin/agents` genuinely live multi-citizen feed | P3 plan / P2 plan | 🟡 **Half-built** | `admin.agents.tsx` does have a real `postgres_changes` subscription block — but it's paired with a parallel `setTimeout` loop that pushes from `MOCK_AGENT_EVENTS` into the same state array. Right now this page is a hybrid: partly real, partly simulated, and a careful judge watching two browser tabs side-by-side could notice the feed doesn't reliably mix the two. |
+| 21 | `@tanstack/react-query` installed but unused | Noted in P1 plan (E.8) | 🟡 **Not adopted** | It's a dependency; zero routes use `useQuery`/`useMutation`. Not urgent — data fetching currently works via plain `async`/`await` in `services.ts` — but worth a mention since it was called out as the idiomatic pattern to use going forward. Low priority; not recommended to retrofit under hackathon time pressure unless you have slack at the very end. |
+
+### The honest one-paragraph summary
+
+**Phase 1's fixes mostly landed** (items 1, 3, 4, 5, 6, 7, 8) — the frontend/database layer is in genuinely good shape. **Phase 2's critical bugs did not get fixed** (items 9, 10, 11, 13, 14, 15) — the backend still won't boot correctly on Render, is still unauthenticated, and still silently mis-attributes citizen data. **Phase 3's actual work never started** (items 12, 17, 18, 19) — the two most important agents in your "agentic AI workforce" pitch, Eligibility Agent and Document Agent, still do not call an LLM or read real data at all; they're the same hardcoded stand-ins from before Phase 2 began. `document_extractor.py` is a well-written module sitting completely disconnected from the running system.
+
+**This is why Phase 4 below is scoped the way it is: it has to do Phase 2's cleanup and Phase 3's actual build in one pass**, because none of Phase 4's real work (a genuinely evidence-backed Eligibility Agent) can be trusted to run or demo safely on top of a backend that doesn't boot, isn't authenticated, and silently swaps in fake profile data on error.
+
+---
+
+## Part A — Remaining roadmap (kept to two more phases)
+
+You asked me not to over-split this. Given the audit above, here's the honest minimum:
+
+### Phase 4 — Close the AI loop (this document, in full below)
+Fix every 🔴 item above, finish wiring document intelligence end-to-end, make Eligibility Agent and Document Agent actually reason over real data with Groq, and finish `seed-demo-data` so the whole demo narrative is reproducible. **Done means: every agent in the graph is doing something real, the backend actually boots and is actually authenticated, and the citizen success path (upload missing doc → re-run → reach Application Agent) is reachable for the first time.**
+
+### Phase 5 — Pitch hardening & deployment
+Once Phase 4 is solid: a full rehearsal pass, a pre-recorded backup demo video, a final pass over every empty/loading/error state across all 17 routes, load-testing 3–4 concurrent runs against Groq's real rate limits, Render cold-start pre-warming discipline for pitch day, and judge Q&A rehearsal. This phase is comparatively light — most of the "pitch hardening" work Phase 1's original roadmap assigned to a Phase 4 (analytics wiring, mainly) turned out to already be done (see item 21's sibling functions `getAdminMetrics`/`getAdminSchemes`, which already have the real-query-with-fallback pattern). I'm happy to write Phase 5 out in the same depth once Phase 4 is actually working end-to-end — building it now would mean planning around assumptions about what Phase 4 leaves in place.
+
+That's it — two phases, not four. If you run out of time after Phase 4, you already have a demoable, honestly-real agentic system; Phase 5 is polish and risk-reduction, not new capability.
+
+---
+
+## Part B — Making it presentable for the final pitch
+
+The judging risk hasn't changed since the Phase 1 plan identified it, but it's sharper now: **your pitch deck's headline differentiator — "evidence-backed eligibility" — is the one piece of the system that's currently the least real.** Fix that first; everything else is secondary to a judge who asks "so how does the AI actually decide eligibility?" and gets a rubber-stamp explained live.
+
+**Demo script (updated for what Phase 4 will make true):**
+1. Open `/assistant` as Rahul Sharma. Type a real need (try Hindi/Hinglish for the multilingual USP beat).
+2. Narrate the handoff as it happens — this part already looks good today and doesn't need Phase 4 to be convincing.
+3. When Eligibility Agent runs, **say the sentence your Phase 4 build will make literally true**: "the income threshold is checked in code against your actual profile value, not guessed by the model — the model only interprets the criteria that are genuinely qualitative, and every check writes an audit row with the requirement and the evidence side by side." Then actually open `/admin` → audit log and show it.
+4. Hit the missing-document moment, upload the real enrollment certificate, and show it flow through `document_agent` → back to `eligibility_agent` → to `application_agent` — **this loop closing live is your best demo moment, and it is currently impossible to do in the deployed code** (item #12/#19). It becomes possible after Phase 4.
+5. Show the human-approval gate before final submission — citizen controls submission, not the AI.
+6. Close on `/admin/agents` with two devices/tabs open, showing two citizens' runs interleaved — your best "real infrastructure" beat.
+
+**Pitch hygiene carried over from the last round, still true:**
+- Fix the Next.js → Vite/TanStack Start line in the tech stack slide if you haven't already.
+- Have the backup video ready — Render free-tier cold starts and Groq rate limits are real live-demo risks; hit `/health` a minute before you go on.
+- Don't claim the eligibility check is "AI-verified" for numeric criteria once Phase 4 lands — say it's *hybrid*: deterministic code for numbers, LLM judgment for qualitative criteria, both logged. That's a stronger, more credible claim than "the AI decided," and it directly answers the "how do you know it's not hallucinating" question judges will ask.
+
+---
+
+## Part C — Groq models, re-verified against the live catalog (Sept 10, 2026)
+
+You asked me to check current models rather than trust memory — I did, against `console.groq.com/docs/models` directly, and the picture has shifted slightly even since your Phase 1 plan was written a few days ago:
+
+- **`llama-3.1-8b-instant` and `llama-3.3-70b-versatile` are now listed as Enterprise-only ("Contact Sales")** on Groq's production model table — not just deprecated, now gated behind an enterprise plan entirely. Do not plan around these as a free-tier fallback anywhere in your code (worth double-checking nothing in your codebase still references them as a fallback string).
+- **`openai/gpt-oss-120b`** and **`openai/gpt-oss-20b`** remain the standard production text models, openly available, with Developer-plan limits of 250K TPM / 1,000 RPM (free tier is lower — roughly 30 RPM, ~8,000 TPM per Groq's public free-tier table — plenty for a hackathon demo, but don't hammer it during dev with your demo key).
+- **`qwen/qwen3.6-27b`** is the vision-capable model currently on Groq's catalog (Preview tier — fine for a hackathon, not for anything you'd call production), supporting image input up to 20 MB per file, 250K TPM / 1,000 RPM on the Developer plan. **This is what `document_extractor.py`'s `MODEL_VISION` should actually point to** — the current default (`llama-3.2-11b-vision-preview`) does not appear on Groq's live catalog at all anymore and will fail outright if called.
+- **`groq/compound`** and **`groq/compound-mini`** are still available — Groq's own agentic systems with built-in web search and code execution (200K TPM / 200 RPM). Still a legitimate shortcut for Scheme Agent if you want retrieval-augmented ranking without building a custom search tool, though your current implementation doesn't use this and doesn't need to for Phase 4.
+- No new deprecations affect `openai/gpt-oss-120b`/`20b` since your Phase 1 plan was written — the model routing recommendation from that plan still holds. The one concrete change you need to make is the vision model ID.
+
+**Updated model table for Phase 4:**
+
+| Node | Model | Why |
+|---|---|---|
+| `citizen_agent` | `openai/gpt-oss-20b` | Unchanged — simple classification |
+| `scheme_agent` | `openai/gpt-oss-120b` | Unchanged — reasoning over candidates |
+| `eligibility_agent` (LLM path only, for text/boolean/enum rules) | `openai/gpt-oss-120b` | Needs to write a correct, well-justified explanation; numeric rules stay deterministic (Part D.5) |
+| `document_agent` (deterministic — see Part D.6, no LLM needed for the matching logic itself) | — | Set arithmetic against real tables, not a model call |
+| Document extraction (vision) | `qwen/qwen3.6-27b` **(updated from the stale `llama-3.2-11b-vision-preview`)** | Only vision-capable model currently on Groq's catalog; 20 MB file limit is generous for scanned certificates |
+| `application_agent` | `openai/gpt-oss-20b` | Unchanged — templating |
+
+Keep every model ID in an environment variable (`MODEL_FAST`, `MODEL_REASONING`, `MODEL_VISION`) as you already do in `render.yaml` — just update the `MODEL_VISION` default/value.
+
+---
+
+## Part D — In-depth Phase 4 implementation plan
+
+This is the plan to hand your coding agent. **Phase 4's job: make every claim in your pitch deck true in the running code** — a backend that actually boots and is actually authenticated, an Eligibility Agent that actually evaluates rules, a Document Agent that actually reads real records, and a document upload that actually gets read by a vision model. Nothing here changes what the UI looks like; you're replacing the last remaining fake internals.
+
+### D.1 Goals & definition of done
+
+- The Render backend boots successfully from a clean deploy using either the Dockerfile or `render.yaml` (pick one, delete the other) — no `ModuleNotFoundError`.
+- `POST /run` and `POST /extract-document` both reject any request missing a valid, exactly-matching `X-Sahayak-Internal-Secret` header, unconditionally — no "if present" gate, no hardcoded fallback value.
+- `orchestrate-agent-run` rejects any request without a valid Supabase session — no citizen-impersonation fallback.
+- `eligibility_agent_node` evaluates every rule against real data: numeric rules via a deterministic parser/comparator, qualitative rules via a real Groq call, and every evaluation writes a real `audit_logs` row citing the actual requirement text and the actual evidence value used.
+- `document_agent_node` queries real `document_requirements` (for the selected scheme) and real `documents` (already on file for the citizen) and computes missing/verified sets from that — no hardcoded string, for any scheme.
+- A citizen can upload a real file in `/documents`, have it land in Storage, and have a real Groq vision call (or its OCR fallback) populate `extracted_fields`/`confidence`/`status` on the `documents` row — no more constant "Rahul Sharma, DOB 15-08-2004" regardless of what was uploaded.
+- The eligibility ↔ document loop closes for real: uploading the missing document and re-running actually reaches `application_agent` and a `COMPLETED` run. Today this path is structurally present in the graph but cannot be reached (Part 0, item 12/19) — after Phase 4 it must be reachable in a live demo.
+- `seed-demo-data` produces the entire demo scenario in one call: schemes + rules + doc requirements (already there) **plus** the Rahul Sharma `profiles` row, **plus** an in-progress `applications` row, **plus** a `documents` row reflecting the missing enrollment certificate.
+- `use-agent-run.ts` trusts `agent_runs.status` as ground truth (not agent-name string matching) and surfaces a visible error/retry state after a timeout instead of an infinite spinner.
+- `/admin/agents` is fully real — the `MOCK_AGENT_EVENTS` simulation path is deleted, not just made to coexist with the real subscription.
+
+### D.2 Architecture (unchanged from Phase 2/3 plans — confirmed still correct)
+
+```
+Citizen types need in /assistant
+        │
+        ▼
+Supabase Edge Function: orchestrate-agent-run   (fixed: real auth, no impersonation fallback)
+        │  verifies JWT → 401 if invalid/missing
+        │  inserts agent_runs row (service role)
+        │  fires POST to Render, does not wait
+        ▼
+Render (FastAPI + LangGraph, Python)             (fixed: boots correctly, secret required)
+        │  each node: calls Groq where genuinely needed → writes agent_events + audit_logs
+        ▼
+Supabase Postgres  ──Realtime──▶  /assistant, /admin/agents  (fixed: status from agent_runs, no mock fallback)
+
+Citizen uploads a document in /documents
+        │  client → Supabase Storage (already working since Phase 1)
+        │  client → new Edge Function: extract-document               (NEW this phase)
+        ▼
+Render: POST /extract-document                                        (NEW this phase — wires up
+        │  downloads file (service role, no signed URL needed)         the already-written but
+        │  calls Groq vision model (qwen/qwen3.6-27b)                  currently orphaned
+        │  writes extracted_fields/confidence/status back to documents document_extractor.py)
+```
+
+No new services, no new hosting decisions — this phase is entirely about fixing and finishing what's already stood up.
+
+### D.3 Task Group 1 — Fix the four boot/security bugs (do these first, nothing else is safely testable otherwise)
+
+**D.3.1 Import path / deployment consistency (item 9).**
+Pick one of these two approaches and apply it consistently across `app.py`, `agent_graph.py`, `render.yaml`, and `Dockerfile`:
+
+- **Option A (recommended — smallest diff):** make imports flat, matching how the process is actually run.
+  ```python
+  # backend/app.py
+  from agent_graph import sahayak_agent_workflow, write_agent_event
+  # backend/agent_graph.py
+  from state import (SahayakState, NeedIntent, SchemeRankingResult, EligibilityResult, DocumentRequirementCheck, ApplicationDraftPayload)
+  ```
+  Keep `render.yaml`'s `startCommand: uvicorn app:app ...` and the `Dockerfile`'s `CMD ["uvicorn", "app:app", ...]` exactly as they are — they already assume flat imports, so Option A just makes the Python match the deployment, which is the smaller change.
+- **Option B:** keep `backend.` package-style imports, but change `render.yaml` to `startCommand: uvicorn backend.app:app --host 0.0.0.0 --port $PORT`, set Render's root directory to the repo root (not `backend/`), and change the `Dockerfile`'s `WORKDIR`/`COPY` so `backend/` is a real subpackage under `/app` (i.e. `COPY backend/ ./backend/` instead of `COPY . .` from inside the `backend/` build context).
+
+Either is fine — just pick one and delete every trace of the other pattern (e.g. if you go with Option A, also update `document_extractor.py`'s imports if it has any `from backend.` references, and remove the now-redundant `render.yaml` vs `Dockerfile` ambiguity by deleting whichever one you don't actually use to deploy — `render.yaml`'s `env: python` currently means Render ignores the Dockerfile entirely, so the Dockerfile is presently unused dead weight; delete it or clearly document it as "for local Docker testing only, not what Render runs.")
+
+**D.3.2 Internal secret check (item 10).** In `backend/app.py`, on both `/run` and (the new) `/extract-document`:
+```python
+INTERNAL_SECRET = os.getenv("INTERNAL_SHARED_SECRET")
+if not INTERNAL_SECRET:
+    raise RuntimeError("INTERNAL_SHARED_SECRET must be set — refusing to start without it.")
+
+# In each endpoint:
+if x_sahayak_internal_secret != INTERNAL_SECRET:
+    raise HTTPException(status_code=403, detail="Forbidden")
+```
+No `if INTERNAL_SECRET and x_sahayak_internal_secret:` gate, no default fallback string. Fail loudly at startup if the env var is missing rather than silently accepting unauthenticated traffic.
+
+**D.3.3 Edge Function auth fallback (item 11).** In `orchestrate-agent-run/index.ts`:
+```ts
+const authHeader = req.headers.get("Authorization");
+if (!authHeader) {
+  return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+}
+const token = authHeader.replace("Bearer ", "");
+const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+if (error || !user?.id) {
+  return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: corsHeaders });
+}
+const citizenId = user.id; // no fallback default, ever
+```
+Do the identical fix for the new `extract-document` Edge Function you're about to write (D.7).
+
+**D.3.4 `.maybeSingle()` typo in `app.py` (item 13).** In `run_langgraph_task()`:
+```python
+res = supabase_admin.table("profiles").select("*").eq("id", citizen_id).maybe_single().execute()
+```
+Also change the surrounding `except Exception as e: logger.warning(...)` to `logger.error(...)` — a regression here should be loud in your logs, not a quiet warning, since it means every citizen's run is silently using the wrong profile.
+
+**Verify all four together** with `curl -X POST https://<render-url>/run` sending no headers at all, confirming a `403`/`401`, before moving to Task Group 2.
+
+### D.4 Task Group 2 — Finish `seed-demo-data`
+
+Extend the existing function (don't create a second one) to also do, after the existing scheme/rule/doc-requirement upserts:
+
+```ts
+// 4. Upsert the demo citizen's profile (requires the auth user to already exist —
+//    this function assumes rahul@sahayak.demo was created via the app's own signup/demo-login
+//    flow at least once; if you want this fully self-contained, create the auth user here too
+//    via supabaseAdmin.auth.admin.createUser(), which is safe since this function already
+//    holds the service-role key)
+const { data: existingUser } = await supabaseAdmin.auth.admin.listUsers();
+let rahulId = existingUser?.users?.find(u => u.email === "rahul@sahayak.demo")?.id;
+
+if (!rahulId) {
+  const { data: created } = await supabaseAdmin.auth.admin.createUser({
+    email: "rahul@sahayak.demo",
+    password: "SahayakDemo@2026",
+    email_confirm: true,
+    user_metadata: { full_name: "Rahul Sharma" },
+  });
+  rahulId = created?.user?.id;
+}
+
+await supabaseAdmin.from("profiles").upsert({
+  id: rahulId,
+  full_name: "Rahul Sharma",
+  age: 20,
+  location: "Lucknow, Uttar Pradesh",
+  occupation: "Undergraduate student",
+  annual_income: 210000,
+  phone: "+91 98765 43210",
+  role: "citizen",
+});
+
+// 5. Upsert the in-progress application (awaiting the missing enrollment certificate)
+await supabaseAdmin.from("applications").upsert({
+  citizen_id: rahulId,
+  scheme_id: "a0000000-0000-0000-0000-000000000001",
+  status: "under_review",
+  applicant_info: {
+    "Full Name": { value: "Rahul Sharma", status: "verified" },
+    "Annual Income": { value: "₹2,10,000", status: "verified" },
+  },
+  tracking_id: "SAH-2026-DEMO01",
+}, { onConflict: "citizen_id,scheme_id" });
+
+// 6. Upsert the citizen's on-file documents (2 verified, enrollment missing —
+//    i.e., don't insert a row for the missing one at all; "missing" = absence)
+await supabaseAdmin.from("documents").upsert([
+  { citizen_id: rahulId, document_type: "Aadhaar Card", status: "verified", confidence: 0.97 },
+  { citizen_id: rahulId, document_type: "Income Certificate", status: "verified", confidence: 0.94 },
+]);
+```
+This makes the whole demo scenario reproducible from one authenticated admin call, exactly as originally scoped in Phase 1 — it just never got finished. Trigger it before every rehearsal.
+
+### D.5 Task Group 3 — Real `eligibility_agent_node` (hybrid deterministic + LLM)
+
+This is the centerpiece of Phase 4 and the biggest single chunk of work — budget accordingly (realistically 30–40% of the phase's total effort).
+
+```python
+import re
+
+KNOWN_NUMERIC_PROFILE_FIELDS = {
+    "annual household income": "annual_income",
+    "age": "age",
+}
+
+def deterministic_numeric_check(rule: dict, citizen_profile: dict) -> Optional[dict]:
+    """Parses common government requirement phrasings and compares to a real profile field.
+    Returns None if it can't confidently parse the requirement — caller falls through to the LLM path."""
+    criterion = rule["criterion_name"].strip().lower()
+    field_key = KNOWN_NUMERIC_PROFILE_FIELDS.get(criterion)
+    if not field_key or field_key not in citizen_profile:
+        return None
+
+    requirement = rule["requirement"]
+    citizen_value = citizen_profile[field_key]
+
+    # "Below ₹3,50,000" / "Below Rs 350000"
+    m = re.search(r"below\s*[₹Rs.]*\s*([\d,]+)", requirement, re.IGNORECASE)
+    if m:
+        threshold = int(m.group(1).replace(",", ""))
+        status = "verified" if citizen_value < threshold else "mismatch"
+        return {"status": status, "citizen_info": f"₹{citizen_value:,}", "explanation":
+                f"Requirement is below ₹{threshold:,}; citizen's actual value is ₹{citizen_value:,}."}
+
+    # "14-18 years" / "18-25 years" range
+    m = re.search(r"(\d+)\s*-\s*(\d+)\s*years?", requirement, re.IGNORECASE)
+    if m:
+        lo, hi = int(m.group(1)), int(m.group(2))
+        status = "verified" if lo <= citizen_value <= hi else "mismatch"
+        return {"status": status, "citizen_info": f"{citizen_value} years", "explanation":
+                f"Requirement is {lo}-{hi} years; citizen is {citizen_value} years old."}
+
+    return None  # couldn't confidently parse — fall through to LLM judgment, don't guess
+
+def llm_judge_rule(rule: dict, citizen_profile: dict, verified_documents: List[dict]) -> dict:
+    """For boolean/enum/text rules, or numeric rules the parser couldn't handle confidently."""
+    system_prompt = (
+        "You are Sahayak's Eligibility Agent. Judge whether the citizen satisfies ONE specific "
+        "scheme criterion, using ONLY the evidence provided — never assume anything not given. "
+        "Return JSON: {'status': 'verified'|'missing'|'mismatch', 'citizen_info': 'the evidence value you used, verbatim', "
+        "'explanation': 'one sentence citing exactly which piece of evidence you used'}. "
+        "If there is no evidence available for this criterion at all, return status 'missing', "
+        "not a guess."
+    )
+    user_prompt = (
+        f"Criterion: {rule['criterion_name']}\n"
+        f"Requirement: {rule['requirement']}\n"
+        f"Rule type: {rule['rule_type']}\n"
+        f"Citizen profile: {json.dumps(citizen_profile)}\n"
+        f"Verified documents on file: {json.dumps(verified_documents)}"
+    )
+    result = call_groq_json_with_retry(MODEL_REASONING, system_prompt, user_prompt)
+    if not result:
+        return {"status": "missing", "citizen_info": "Unable to evaluate", "explanation": "Evaluation service unavailable."}
+    return result
+
+def eligibility_agent_node(state: SahayakState) -> Dict[str, Any]:
+    run_id, scheme_id = state.get("run_id"), state.get("selected_scheme_id")
+    profile = state.get("citizen_profile", {})
+    write_agent_event(run_id, "Eligibility Agent", "Evaluating scheme criteria against verified citizen evidence...")
+
+    rules_data = []
+    verified_docs = []
+    if supabase_admin and scheme_id:
+        try:
+            rules_data = supabase_admin.table("eligibility_rules").select("*").eq("scheme_id", scheme_id).execute().data or []
+            citizen_id = state.get("citizen_id")
+            verified_docs = supabase_admin.table("documents").select("document_type,extracted_fields").eq("citizen_id", citizen_id).eq("status", "verified").execute().data or []
+        except Exception as e:
+            logger.error(f"Error fetching rules/documents for eligibility check: {e}")
+
+    evaluated_criteria = []
+    has_missing = False
+
+    for rule in rules_data:
+        result = None
+        if rule.get("rule_type") == "numeric":
+            result = deterministic_numeric_check(rule, profile)
+        if result is None:
+            result = llm_judge_rule(rule, profile, verified_docs)
+
+        status = result.get("status", "missing")
+        if status != "verified":
+            has_missing = True
+
+        evaluated_criteria.append({
+            "criterion_name": rule["criterion_name"],
+            "citizen_info": result.get("citizen_info", ""),
+            "requirement": rule["requirement"],
+            "evidence_source": rule.get("evidence_source", "Profile"),
+            "status": status,
+            "explanation": result.get("explanation", ""),
+        })
+
+        write_audit_log(run_id, "Eligibility Agent", f"Evaluated rule: {rule['criterion_name']}",
+                         evidence=f"Requirement: {rule['requirement']} | Citizen data: {result.get('citizen_info','')}",
+                         result=status.upper())
+
+    is_eligible = not has_missing
+    eligibility_payload = {
+        "is_eligible": is_eligible,
+        "criteria": evaluated_criteria,
+        "message": "All criteria verified." if is_eligible else "Action needed: one or more criteria unresolved.",
+    }
+
+    # Validate before returning — see D.8
+    try:
+        EligibilityResult(**{"is_eligible": is_eligible, "criteria": evaluated_criteria, "message": eligibility_payload["message"]})
+    except Exception as e:
+        logger.error(f"eligibility_agent_node produced an invalid payload shape: {e}")
+
+    write_agent_event(run_id, "Eligibility Agent",
+                       "Criteria evaluation complete." if is_eligible else "One or more criteria could not be verified.",
+                       {"eligibility": eligibility_payload})
+    return {"eligibility_result": eligibility_payload}
+```
+The parser above only needs to cover the ~5 rule phrasings in your seeded demo schemes (see D.4) — it's intentionally not a general-purpose requirement-text parser. Anything it can't confidently match falls through to the LLM, which is the correct default, not a gap.
+
+### D.6 Task Group 4 — Real `document_agent_node`
+
+No LLM call is actually needed for the *matching* logic — this is genuine set arithmetic, and a deterministic answer is more trustworthy here than a model guess:
+
+```python
+def document_agent_node(state: SahayakState) -> Dict[str, Any]:
+    run_id, scheme_id, citizen_id = state.get("run_id"), state.get("selected_scheme_id"), state.get("citizen_id")
+    retry_count = state.get("retry_count", 0)
+    write_agent_event(run_id, "Document Agent", "Checking required documents against citizen records...")
+
+    required, on_file_types = [], set()
+    if supabase_admin and scheme_id:
+        try:
+            required = supabase_admin.table("document_requirements").select("*").eq("scheme_id", scheme_id).execute().data or []
+            on_file = supabase_admin.table("documents").select("document_type").eq("citizen_id", citizen_id).eq("status", "verified").execute().data or []
+            on_file_types = {d["document_type"] for d in on_file}
+        except Exception as e:
+            logger.error(f"Error fetching document requirements/on-file documents: {e}")
+
+    missing = [r["document_type"] for r in required if r.get("is_mandatory") and r["document_type"] not in on_file_types]
+    verified = [r["document_type"] for r in required if r["document_type"] in on_file_types]
+
+    message = (f"{len(missing)} required document(s) missing: {', '.join(missing)}. Upload required to proceed."
+               if missing else "All required documents are on file and verified.")
+    write_agent_event(run_id, "Document Agent", message, {"missing_documents": missing, "verified_documents": verified})
+
+    next_action = None
+    if missing:
+        next_action = {"type": "upload_document", "document_name": missing[0],
+                        "description": f"Please upload your {missing[0]} to continue application assembly.",
+                        "agent": "Document Agent"}
+
+    return {"missing_documents": missing, "next_action": next_action, "retry_count": retry_count + 1}
+```
+Once this and D.5 both read real data, the existing conditional-edge loop (`eligibility_agent → document_agent → eligibility_agent`, capped at one re-entry) finally does something meaningful: uploading the real enrollment certificate mid-flow lets `document_agent` see it on the second pass, `eligibility_agent` re-evaluate with the new evidence, and the run actually reach `application_agent` — the success path that's currently structurally present but unreachable.
+
+### D.7 Task Group 5 — Wire document extraction end-to-end
+
+**D.7.1 Fix the vision model default** in `backend/document_extractor.py`:
+```python
+MODEL_VISION = os.getenv("MODEL_VISION", "qwen/qwen3.6-27b")
+```
+Also add `MODEL_VISION` to `render.yaml`'s `envVars` list (it's currently only `MODEL_FAST`/`MODEL_REASONING`).
+
+**D.7.2 Add the missing endpoint** to `backend/app.py`:
+```python
+from document_extractor import extract_document_data  # matches your Task Group 1 import fix
+
+class ExtractRequest(BaseModel):
+    document_id: str
+
+@app.post("/extract-document")
+def extract_document(req: ExtractRequest, x_sahayak_internal_secret: Optional[str] = Header(None, alias="X-Sahayak-Internal-Secret")):
+    if x_sahayak_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        result = extract_document_data(req.document_id)
+        return {"status": "success", "extracted": result}
+    except Exception as e:
+        logger.error(f"Document extraction failed for {req.document_id}: {e}")
+        raise HTTPException(status_code=500, detail="Extraction failed")
+```
+
+**D.7.3 Add the `extract-document` Supabase Edge Function** (mirrors `orchestrate-agent-run`'s structure, single-shot instead of fire-and-forget since you'll want to know it succeeded before showing the citizen a status):
+```ts
+// supabase/functions/extract-document/index.ts
+// Same auth pattern as D.3.3 — require a valid session, no fallback.
+// Body: { document_id }
+// Forwards to Render's /extract-document with the internal secret header, awaits and relays the response.
+```
+
+**D.7.4 Trigger it from `/documents`.** In the upload handler in `src/routes/documents.tsx` (or wherever `validateDocument()` is called from), after the Storage upload + metadata insert succeeds, call the new Edge Function with the inserted row's `id` and update local UI state from the response (or just re-fetch the document row — simplest option, avoids duplicating the extracted-field shape on the client).
+
+**D.7.5 Keep the existing OCR-less fallback in `document_extractor.py` as your safety net** — it already degrades gracefully to plausible fake data if the vision call fails, which the Phase 3 plan explicitly called "worth building even if you don't demo it." Leave it; don't build the `pytesseract` fallback unless you have slack time left in this phase — the vision-model path with this safety net is enough for a hackathon demo, and building OCR too is a stretch goal, not the phase's definition of done.
+
+### D.8 Task Group 6 — Validate structured outputs against the Pydantic schemas
+
+Wrap every node's `call_groq_json_with_retry()` result:
+```python
+def validate_or_fallback(model_cls, data: dict, fallback: dict) -> dict:
+    try:
+        return model_cls(**data).model_dump()
+    except Exception as e:
+        logger.error(f"LLM output failed schema validation against {model_cls.__name__}: {e}")
+        return fallback
+```
+Apply this in `citizen_agent_node` (against `NeedIntent`), `scheme_agent_node` (against `SchemeRankingResult`), and the new `eligibility_agent_node` (against `EligibilityResult`, as shown in D.5). This turns "the model returned syntactically valid JSON with a missing field" from a silent frontend-breaking bug into a caught, logged, gracefully-defaulted case.
+
+### D.9 Task Group 7 — Frontend polish
+
+**D.9.1 Fix `use-agent-run.ts`** to read `agent_runs.status` as the source of truth, and add a timeout:
+```ts
+// Subscribe to agent_runs row changes (status) as its own channel, separate from agent_events (message feed).
+const runChannel = supabase.channel(`agent_runs:${runId}`)
+  .on("postgres_changes", { event: "UPDATE", schema: "public", table: "agent_runs", filter: `id=eq.${runId}` },
+      (payload) => setStatus(payload.new.status))
+  .subscribe();
+
+// In startRun(), after dispatching:
+const timeoutId = setTimeout(() => {
+  if (/* no event received yet */) setStatus("ERROR"); // surface a visible retry state, not silence
+}, 9000);
+```
+Remove the `agent_name.includes("document")` / `.includes("application")` inference entirely — it's now redundant and was the source of the premature `ACTION_REQUIRED` flip described in Part 0, item 15.
+
+**D.9.2 Clean up `admin.agents.tsx`.** Delete the `MOCK_AGENT_EVENTS` `setTimeout` simulation block entirely — keep only the real `postgres_changes` subscription (admin's RLS already grants full visibility across citizens, no `run_id` filter needed). Group the feed visually by `run_id` so two citizens' concurrent runs read as two distinct threads, not one interleaved mess.
+
+**D.9.3 Small one-liner while you're in `auth.ts`/routes:** change `src/routes/admin.index.tsx`'s guard from `requireAuth()` to `requireAdmin()` to match the intended access model (Part 0, item 7's sibling issue).
+
+### D.10 Task order (sequential, for your coding agent)
+
+1. Task Group 1 (D.3) — all four boot/security fixes. Verify with the `curl` no-header test before anything else.
+2. Deploy the fixed backend to Render, confirm `/health` responds and a real `/run` call (with the correct secret) reaches `citizen_agent_node` and writes an `agent_events` row.
+3. Task Group 2 (D.4) — finish `seed-demo-data`, run it, confirm `/dashboard` shows real seeded numbers for the real Rahul Sharma account.
+4. Task Group 3 (D.5) — rebuild `eligibility_agent_node`. Test in isolation first: call it directly with a few hand-constructed states (income above/below threshold, enrollment present/missing) before wiring it back into the graph.
+5. Task Group 4 (D.6) — rebuild `document_agent_node`. Same isolated-test-first approach.
+6. Verify the loop closes: run the full `/assistant` flow, hit the missing-document branch, and confirm the run terminates in `ACTION REQUIRED` (not a crash).
+7. Task Group 5 (D.7) — wire document extraction end-to-end. Upload a real test image, confirm `extracted_fields` reflects what's actually in the image, not a fixed constant.
+8. Re-run the full flow: upload the real missing document, re-trigger `/assistant`, confirm the citizen now actually reaches `application_agent` and a `COMPLETED` run — this exact path was impossible before this phase.
+9. Task Group 6 (D.8) — add schema validation across all three LLM-calling nodes.
+10. Task Group 7 (D.9) — frontend polish: `use-agent-run.ts` fix, `admin.agents.tsx` cleanup, `admin.index.tsx` guard fix.
+11. Full rehearsal: reset via `seed-demo-data`, run the citizen journey twice back-to-back for reproducibility, then run it a third time as a *second* citizen (sign up fresh) to confirm no cross-citizen data bleed (this directly tests that the `.maybe_single()` fix actually took).
+
+### D.11 Acceptance checklist
+
+- [ ] `curl -X POST https://<render-url>/run` and `.../extract-document` with no headers both return `403`, not `202`/`200`
+- [ ] A fresh Render deploy boots without `ModuleNotFoundError`
+- [ ] Calling `orchestrate-agent-run` with no `Authorization` header returns `401`, not a run for the demo citizen
+- [ ] Two different logged-in citizens each see their own real profile data in a run (confirms the `.maybe_single()` fix)
+- [ ] A scheme with no "enrollment"-named rule (e.g. PM-KISAN) gets its own actual criteria evaluated — not rubber-stamped
+- [ ] The income numeric check produces `verified`/`mismatch` correctly for at least one above-threshold and one below-threshold test profile
+- [ ] `document_agent_node` returns different missing-document lists for two different schemes, and an empty list once all required documents are verified
+- [ ] Uploading a real test document produces `extracted_fields` that reflect what's actually in the image (try one clear image and one deliberately blurry one — the second should land in `needs_review`, not crash)
+- [ ] Uploading the missing enrollment certificate mid-demo and re-running reaches a `COMPLETED` run with a real `applications` row in `awaiting_approval`
+- [ ] `seed-demo-data`, run once, reproduces the exact `/dashboard` numbers your pitch narrates (benefits discovered, applications in progress, documents verified)
+- [ ] `/admin/agents` shows two concurrent citizens' runs, visually grouped, with zero remaining references to `MOCK_AGENT_EVENTS`
+- [ ] Killing the Render service mid-run leaves the citizen-facing UI in a visible error/retry state within ~9 seconds, not an infinite spinner
+
+### D.12 Explicit non-goals for Phase 4
+
+- No `pytesseract`/OCR fallback beyond the vision model's own existing graceful-degradation path (D.7.5) — real insurance, but not this phase's job to build if time is short.
+- No retry/checkpointing of a half-finished LangGraph run — a citizen who hits a failure re-triggers from `/assistant`, same as Phase 2 scoped.
+- No adoption of `@tanstack/react-query` — leave the current `async`/`await` pattern in `services.ts` as-is; this is cleanup, not correctness, and isn't worth the risk this late.
+- No horizontal scaling / multi-instance Render concerns — a single instance is fine for hackathon-scale concurrent judges.
+- No new UI screens or navigation changes — everything in this phase is internal correctness, and the UI should look identical before and after.
+
+---
+
+Once Phase 4's acceptance checklist is fully green — especially the loop-closing item and the two-citizen isolation item — you'll have an agentic system where every claim in your pitch deck is literally true in the running code, not just true in a plan document. At that point Phase 5 (rehearsal, backup video, final hardening) is a short, low-risk phase, and I'll write that one out in full once you're there.
