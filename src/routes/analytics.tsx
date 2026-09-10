@@ -1,4 +1,5 @@
-import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import {
   BarChart,
   Bar,
@@ -15,8 +16,15 @@ import {
   LineChart,
   Line,
 } from "recharts";
-import { Users, FileText, CheckCircle, Clock, Activity, Shield } from "lucide-react";
+import { FileText, CheckCircle, Shield, AlertCircle, Loader2 } from "lucide-react";
 import { requireAdmin } from "@/lib/auth";
+import {
+  getApplicationsByStage,
+  getDocumentVolumeByDay,
+  getAgentTaskDistribution,
+  getCompletionRateByMonth,
+} from "@/lib/analytics-services";
+import { getAdminMetrics } from "@/lib/admin-services";
 
 export const Route = createFileRoute("/analytics")({
   beforeLoad: async () => {
@@ -25,44 +33,52 @@ export const Route = createFileRoute("/analytics")({
   component: AnalyticsDashboard,
 });
 
-const COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#9333ea"];
-
-const appsByStageData = [
-  { name: "Matched", count: 4200 },
-  { name: "Verifying", count: 2800 },
-  { name: "Drafted", count: 1500 },
-  { name: "Submitted", count: 3100 },
-  { name: "Approved", count: 1800 },
-];
-
-const docVolumeData = [
-  { name: "Mon", count: 1200 },
-  { name: "Tue", count: 1900 },
-  { name: "Wed", count: 1500 },
-  { name: "Thu", count: 2200 },
-  { name: "Fri", count: 2800 },
-  { name: "Sat", count: 1100 },
-  { name: "Sun", count: 900 },
-];
-
-const agentTaskData = [
-  { name: "Scheme Agent", value: 35 },
-  { name: "Eligibility Agent", value: 25 },
-  { name: "Document Agent", value: 20 },
-  { name: "Application Agent", value: 15 },
-  { name: "Tracker Agent", value: 5 },
-];
-
-const completionRateData = [
-  { name: "Jan", rate: 75 },
-  { name: "Feb", rate: 78 },
-  { name: "Mar", rate: 82 },
-  { name: "Apr", rate: 86 },
-  { name: "May", rate: 89 },
-  { name: "Jun", rate: 92 },
-];
+const COLORS = ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#9333ea", "#0284c7"];
 
 function AnalyticsDashboard() {
+  const metricsQuery = useQuery({
+    queryKey: ["admin", "metrics"],
+    queryFn: getAdminMetrics,
+  });
+
+  const stagesQuery = useQuery({
+    queryKey: ["analytics", "stages"],
+    queryFn: async () => {
+      const res = await getApplicationsByStage();
+      if (!res.ok) throw new Error(res.error);
+      return res.data;
+    },
+  });
+
+  const volumeQuery = useQuery({
+    queryKey: ["analytics", "volume"],
+    queryFn: async () => {
+      const res = await getDocumentVolumeByDay(7);
+      if (!res.ok) throw new Error(res.error);
+      return res.data;
+    },
+  });
+
+  const tasksQuery = useQuery({
+    queryKey: ["analytics", "tasks"],
+    queryFn: async () => {
+      const res = await getAgentTaskDistribution();
+      if (!res.ok) throw new Error(res.error);
+      return res.data;
+    },
+  });
+
+  const completionQuery = useQuery({
+    queryKey: ["analytics", "completion"],
+    queryFn: async () => {
+      const res = await getCompletionRateByMonth(6);
+      if (!res.ok) throw new Error(res.error);
+      return res.data;
+    },
+  });
+
+  const metrics = metricsQuery.data;
+
   return (
     <div className="min-h-screen bg-ice-2 text-foreground flex flex-col">
       <header className="sticky top-0 z-30 border-b border-line bg-ice-2/90 backdrop-blur-sm">
@@ -83,7 +99,7 @@ function AnalyticsDashboard() {
             <Link to="/admin/schemes" className="text-muted-foreground hover:text-foreground">
               Knowledge Base
             </Link>
-            <Link to="/analytics" className="text-foreground">
+            <Link to="/analytics" className="text-brand font-semibold">
               Analytics
             </Link>
           </nav>
@@ -95,185 +111,225 @@ function AnalyticsDashboard() {
           <div>
             <h1 className="text-3xl font-display font-semibold mb-2">Platform Analytics</h1>
             <p className="text-muted-foreground">
-              Deep dive into platform usage, agent efficiency, and completion metrics.
+              Real-time platform usage, multi-agent workforce tasks, and citizen outcome metrics.
             </p>
           </div>
         </div>
 
-        {/* Metrics */}
+        {/* Top Metrics Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
           <MetricCard
             title="Applications Processed"
-            value={MOCK_ADMIN_METRICS.applications_processed.toLocaleString()}
-            icon={<FileText className="size-5 text-sage" />}
+            value={metrics ? metrics.applications_processed.toLocaleString() : "—"}
+            icon={<FileText className="size-5 text-brand" />}
+            isLoading={metricsQuery.isLoading}
           />
           <MetricCard
             title="Documents Verified"
-            value={MOCK_ADMIN_METRICS.documents_verified.toLocaleString()}
-            icon={<CheckCircle className="size-5 text-emerald-600" />}
+            value={metrics ? metrics.documents_verified.toLocaleString() : "—"}
+            icon={<CheckCircle className="size-5 text-sage" />}
+            isLoading={metricsQuery.isLoading}
           />
           <MetricCard
             title="Needs Human Review"
-            value={MOCK_ADMIN_METRICS.applications_requiring_review.toString()}
-            icon={<Shield className="size-5 text-rose-500" />}
-            highlight
+            value={metrics ? metrics.applications_requiring_review.toString() : "—"}
+            icon={<Shield className="size-5 text-amber" />}
+            highlight={Boolean(metrics && metrics.applications_requiring_review > 0)}
+            isLoading={metricsQuery.isLoading}
           />
         </div>
 
-        {/* Charts */}
+        {/* Charts Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {/* Applications by Stage */}
           <div className="bg-card rounded-xl border border-line p-6 shadow-sm">
             <h3 className="font-semibold mb-6">Applications by Stage</h3>
             <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={appsByStageData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                  <XAxis
-                    dataKey="name"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: "#6b7280", fontSize: 12 }}
-                    dy={10}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: "#6b7280", fontSize: 12 }}
-                  />
-                  <Tooltip
-                    cursor={{ fill: "#f3f4f6" }}
-                    contentStyle={{
-                      borderRadius: "8px",
-                      border: "none",
-                      boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
-                    }}
-                  />
-                  <Bar dataKey="count" fill="#2563eb" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              {stagesQuery.isLoading ? (
+                <div className="h-full flex items-center justify-center text-muted-foreground text-sm gap-2">
+                  <Loader2 className="size-4 animate-spin" /> Loading stage metrics...
+                </div>
+              ) : stagesQuery.isError ? (
+                <div className="h-full flex flex-col items-center justify-center text-muted-foreground text-sm gap-2">
+                  <AlertCircle className="size-5 text-coral" />
+                  <p>Unable to load stage analytics</p>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={stagesQuery.data || []}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                    <XAxis
+                      dataKey="name"
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: "#6b7280", fontSize: 12 }}
+                      dy={10}
+                    />
+                    <YAxis
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: "#6b7280", fontSize: 12 }}
+                    />
+                    <Tooltip
+                      cursor={{ fill: "#f3f4f6" }}
+                      contentStyle={{
+                        borderRadius: "8px",
+                        border: "none",
+                        boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                      }}
+                    />
+                    <Bar dataKey="count" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
 
+          {/* Document Volume */}
           <div className="bg-card rounded-xl border border-line p-6 shadow-sm">
-            <h3 className="font-semibold mb-6">Document Verification Volume</h3>
+            <h3 className="font-semibold mb-6">Document Verification Volume (Trailing 7 Days)</h3>
             <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={docVolumeData}>
-                  <defs>
-                    <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#16a34a" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#16a34a" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                  <XAxis
-                    dataKey="name"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: "#6b7280", fontSize: 12 }}
-                    dy={10}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: "#6b7280", fontSize: 12 }}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: "8px",
-                      border: "none",
-                      boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
-                    }}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="count"
-                    stroke="#16a34a"
-                    strokeWidth={2}
-                    fillOpacity={1}
-                    fill="url(#colorCount)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              {volumeQuery.isLoading ? (
+                <div className="h-full flex items-center justify-center text-muted-foreground text-sm gap-2">
+                  <Loader2 className="size-4 animate-spin" /> Loading document volume...
+                </div>
+              ) : volumeQuery.isError ? (
+                <div className="h-full flex flex-col items-center justify-center text-muted-foreground text-sm gap-2">
+                  <AlertCircle className="size-5 text-coral" />
+                  <p>Unable to load document volume</p>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={volumeQuery.data || []}>
+                    <defs>
+                      <linearGradient id="colorCount" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#16a34a" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#16a34a" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                    <XAxis
+                      dataKey="name"
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: "#6b7280", fontSize: 12 }}
+                      dy={10}
+                    />
+                    <YAxis
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: "#6b7280", fontSize: 12 }}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        borderRadius: "8px",
+                        border: "none",
+                        boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                      }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="count"
+                      stroke="#16a34a"
+                      strokeWidth={2}
+                      fillOpacity={1}
+                      fill="url(#colorCount)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
 
+          {/* Agent Task Distribution */}
           <div className="bg-card rounded-xl border border-line p-6 shadow-sm">
             <h3 className="font-semibold mb-6">Agent Task Distribution</h3>
             <div className="h-[300px] flex items-center justify-center">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={agentTaskData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={80}
-                    outerRadius={110}
-                    paddingAngle={2}
-                    dataKey="value"
-                  >
-                    {agentTaskData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: "8px",
-                      border: "none",
-                      boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="absolute flex flex-col gap-2 pointer-events-none">
-                {agentTaskData.map((entry, index) => (
-                  <div key={entry.name} className="flex items-center gap-2 text-xs">
-                    <span
-                      className="size-2 rounded-full"
-                      style={{ backgroundColor: COLORS[index % COLORS.length] }}
+              {tasksQuery.isLoading ? (
+                <div className="h-full flex items-center justify-center text-muted-foreground text-sm gap-2">
+                  <Loader2 className="size-4 animate-spin" /> Loading agent tasks...
+                </div>
+              ) : tasksQuery.isError ? (
+                <div className="h-full flex flex-col items-center justify-center text-muted-foreground text-sm gap-2">
+                  <AlertCircle className="size-5 text-coral" />
+                  <p>Unable to load agent tasks</p>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={tasksQuery.data || []}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={80}
+                      outerRadius={110}
+                      paddingAngle={2}
+                      dataKey="value"
+                    >
+                      {(tasksQuery.data || []).map((_, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={{
+                        borderRadius: "8px",
+                        border: "none",
+                        boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                      }}
                     />
-                    <span className="text-muted-foreground">{entry.name}</span>
-                  </div>
-                ))}
-              </div>
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
 
+          {/* Completion Rate */}
           <div className="bg-card rounded-xl border border-line p-6 shadow-sm">
-            <h3 className="font-semibold mb-6">Completion Rate (%)</h3>
+            <h3 className="font-semibold mb-6">Completion & Sanction Rate (%)</h3>
             <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={completionRateData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                  <XAxis
-                    dataKey="name"
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: "#6b7280", fontSize: 12 }}
-                    dy={10}
-                  />
-                  <YAxis
-                    axisLine={false}
-                    tickLine={false}
-                    tick={{ fill: "#6b7280", fontSize: 12 }}
-                    domain={[0, 100]}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: "8px",
-                      border: "none",
-                      boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
-                    }}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="rate"
-                    stroke="#9333ea"
-                    strokeWidth={3}
-                    dot={{ r: 4, fill: "#9333ea" }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              {completionQuery.isLoading ? (
+                <div className="h-full flex items-center justify-center text-muted-foreground text-sm gap-2">
+                  <Loader2 className="size-4 animate-spin" /> Loading completion rates...
+                </div>
+              ) : completionQuery.isError ? (
+                <div className="h-full flex flex-col items-center justify-center text-muted-foreground text-sm gap-2">
+                  <AlertCircle className="size-5 text-coral" />
+                  <p>Unable to load completion rates</p>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={completionQuery.data || []}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                    <XAxis
+                      dataKey="name"
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: "#6b7280", fontSize: 12 }}
+                      dy={10}
+                    />
+                    <YAxis
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: "#6b7280", fontSize: 12 }}
+                      domain={[0, 100]}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        borderRadius: "8px",
+                        border: "none",
+                        boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                      }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="rate"
+                      stroke="#9333ea"
+                      strokeWidth={3}
+                      dot={{ r: 4, fill: "#9333ea" }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
         </div>
@@ -287,21 +343,23 @@ function MetricCard({
   value,
   icon,
   highlight = false,
+  isLoading = false,
 }: {
   title: string;
   value: string;
   icon: React.ReactNode;
   highlight?: boolean;
+  isLoading?: boolean;
 }) {
   return (
     <div
-      className={`p-6 rounded-xl border ${highlight ? "border-rose-200 bg-rose-50/50" : "border-line bg-card"} shadow-sm flex items-center justify-between`}
+      className={`p-6 rounded-xl border ${highlight ? "border-amber/30 bg-amber/5" : "border-line bg-card"} shadow-sm flex items-center justify-between`}
     >
       <div>
         <p className="text-sm font-medium text-muted-foreground mb-1">{title}</p>
-        <p className="text-2xl font-bold">{value}</p>
+        <p className="text-2xl font-bold font-display">{isLoading ? "..." : value}</p>
       </div>
-      <div className="p-3 rounded-xl bg-white shadow-sm border border-line">{icon}</div>
+      <div className="p-3 rounded-xl bg-card shadow-sm border border-line">{icon}</div>
     </div>
   );
 }

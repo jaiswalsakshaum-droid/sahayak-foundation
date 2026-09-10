@@ -16,11 +16,11 @@ export type UserProfile = {
   created_at?: string;
 };
 
-// Fallback demo profile when Supabase keys are not yet configured or for fast offline demo
-export const DEMO_PROFILE: UserProfile = {
+// Used ONLY when Supabase is not configured (local/offline demo). Never used as an error fallback — see Task 9.
+export const LOCAL_DEMO_PROFILE: UserProfile = {
   id: "d0000000-0000-0000-0000-000000000001",
-  email: "rahul.sharma@example.gov.in",
-  full_name: "Rahul Sharma",
+  email: "citizen.demo@example.gov.in",
+  full_name: "Demo Citizen",
   age: 20,
   location: "Lucknow, Uttar Pradesh",
   occupation: "Student / Agricultural Assistant",
@@ -28,6 +28,8 @@ export const DEMO_PROFILE: UserProfile = {
   phone: "+91 98765 43210",
   role: "citizen",
 };
+
+export const DEMO_PROFILE = LOCAL_DEMO_PROFILE;
 
 /**
  * Gets the current active Supabase session
@@ -119,6 +121,30 @@ export async function requireAdmin() {
     });
   }
   return { session, profile };
+}
+
+/**
+ * Convenience helper to check if a user is currently authenticated
+ */
+export async function isAuthenticated(): Promise<boolean> {
+  const session = await getSession();
+  return !!session;
+}
+
+/**
+ * Convenience helper to check if current user is an admin
+ */
+export async function isAdmin(): Promise<boolean> {
+  const profile = await getCurrentProfile();
+  return profile?.role === "admin";
+}
+
+/**
+ * Convenience helper to get current user role
+ */
+export async function getRole(): Promise<UserRole> {
+  const profile = await getCurrentProfile();
+  return profile?.role || "citizen";
 }
 
 /**

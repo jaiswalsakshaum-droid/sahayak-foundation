@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { LanguageSwitcher } from "@/components/sahayak";
 
 import { signUp } from "@/lib/auth";
 
@@ -21,6 +23,7 @@ export const Route = createFileRoute("/signup")({
 });
 
 function SignupPage() {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [mobile, setMobile] = useState("");
   const [password, setPassword] = useState("");
@@ -56,12 +59,15 @@ function SignupPage() {
   return (
     <div className="grid min-h-screen place-items-center bg-ice-2 px-5 py-10">
       <div className="w-full max-w-2xl">
-        <Link to="/" className="mb-8 flex items-center justify-center gap-2.5">
-          <span className="grid size-9 place-items-center rounded-lg bg-brand font-display text-sm font-semibold text-primary-foreground">
-            S
-          </span>
-          <span className="font-display text-lg font-semibold">Sahayak</span>
-        </Link>
+        <div className="mb-6 flex items-center justify-between">
+          <Link to="/" className="flex items-center gap-2.5">
+            <span className="grid size-9 place-items-center rounded-lg bg-brand font-display text-sm font-semibold text-primary-foreground">
+              S
+            </span>
+            <span className="font-display text-lg font-semibold">Sahayak</span>
+          </Link>
+          <LanguageSwitcher />
+        </div>
         <div className="grid gap-6 md:grid-cols-[0.9fr_1.1fr]">
           <div className="hidden rounded-xl bg-brand p-7 text-primary-foreground md:block">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-primary-foreground/60">
@@ -86,15 +92,15 @@ function SignupPage() {
           <Card className="border-line bg-card shadow-sm relative overflow-hidden">
             {isSuccess && <div className="absolute top-0 left-0 w-full h-1 bg-sage" />}
             <CardHeader>
-              <CardTitle className="font-display text-2xl">Create your account</CardTitle>
+              <CardTitle className="font-display text-2xl">{t("auth.signUpTitle", "Create your account")}</CardTitle>
               <p className="text-sm text-muted-foreground">
-                Set up a private space for your benefit journey.
+                {t("auth.signUpSubtitle", "Set up a private space for your benefit journey.")}
               </p>
             </CardHeader>
             <CardContent>
               <form className="space-y-4" onSubmit={handleSignup}>
                 <label className="block text-sm font-medium">
-                  Full name
+                  {t("auth.fullNameLabel", "Full name")}
                   <Input
                     className="mt-2 bg-card"
                     placeholder="Rahul Sharma"
@@ -104,7 +110,7 @@ function SignupPage() {
                   />
                 </label>
                 <label className="block text-sm font-medium">
-                  Email ID or Mobile number
+                  {t("auth.phoneLabel", "Email ID or Mobile number")}
                   <Input
                     className="mt-2 bg-card"
                     placeholder="youremail@gmail.com"
@@ -114,7 +120,7 @@ function SignupPage() {
                   />
                 </label>
                 <label className="block text-sm font-medium">
-                  Password
+                  {t("auth.passwordLabel", "Password")}
                   <Input
                     className="mt-2 bg-card"
                     type="password"
@@ -144,15 +150,15 @@ function SignupPage() {
                     disabled={isLoading || !name || !mobile || !password}
                   >
                     {isLoading ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-                    {isLoading ? "Creating account..." : "Create account"}
+                    {isLoading ? t("common.loading", "Creating account...") : t("auth.signUpButton", "Create Account")}
                     {!isLoading && <ArrowRight className="ml-2 size-4" />}
                   </Button>
                 )}
               </form>
               <p className="mt-5 text-center text-sm text-muted-foreground">
-                Already have an account?{" "}
+                {t("auth.haveAccount", "Already have an account?")}{" "}
                 <Link to="/login" className="font-medium text-brand hover:underline">
-                  Sign in
+                  {t("auth.signInButton", "Sign in")}
                 </Link>
               </p>
             </CardContent>

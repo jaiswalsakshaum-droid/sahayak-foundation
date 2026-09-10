@@ -4,16 +4,86 @@ import {
   ChevronRight,
   CircleAlert,
   FileText,
+  Globe2,
   LockKeyhole,
   MoreHorizontal,
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import type { Status } from "@/lib/mock-data";
+import { SUPPORTED_LANGUAGES, type SupportedLanguageCode } from "@/i18n";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+
+export type Status = "active" | "ready" | "warning" | "critical" | "idle" | "complete";
+
+export function LanguageSwitcher({ className }: { className?: string }) {
+  const { i18n, t } = useTranslation();
+  const currentLang =
+    SUPPORTED_LANGUAGES.find((l) => l.code === i18n.language) || SUPPORTED_LANGUAGES[0];
+
+  const handleLanguageChange = async (code: SupportedLanguageCode) => {
+    await i18n.changeLanguage(code);
+    try {
+      localStorage.setItem("sahayak_lang", code);
+    } catch {
+      // ignore storage error
+    }
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (user) {
+          await supabase
+            .from("profiles")
+            .update({ preferred_language: code })
+            .eq("id", user.id);
+        }
+      } catch {
+        // non-blocking
+      }
+    }
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className={cn("gap-1.5 bg-card text-xs font-medium", className)}
+          aria-label="Select language"
+        >
+          <Globe2 className="size-3.5 text-brand" />
+          <span>{currentLang.nativeName}</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-40">
+        {SUPPORTED_LANGUAGES.map((lang) => (
+          <DropdownMenuItem
+            key={lang.code}
+            onClick={() => handleLanguageChange(lang.code)}
+            className="flex items-center justify-between cursor-pointer text-xs"
+          >
+            <span>{lang.nativeName} ({lang.label})</span>
+            {i18n.language === lang.code && <Check className="size-3.5 text-brand" />}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 const statusStyles: Record<Status, string> = {
   active: "border-sage/20 bg-sage/10 text-sage",

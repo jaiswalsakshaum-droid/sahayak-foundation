@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AgentCard, ConsentModal } from "@/components/sahayak";
-import { agents, journeySteps } from "@/lib/mock-data";
+import { agents, journeySteps } from "@/lib/agent-roster";
 import { useState } from "react";
 
 export const Route = createFileRoute("/")({

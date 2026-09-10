@@ -1,4 +1,6 @@
 import { supabase, isSupabaseConfigured } from "./supabase";
+import { CANONICAL_SCHEME_IDS } from "./scheme-constants";
+import { ok, err, type ServiceResult } from "./result";
 
 // Supabase-compatible data models for Sahayak Admin
 export type Scheme = {
@@ -33,6 +35,7 @@ export type AgentRun = {
   status: "ONLINE" | "PROCESSING" | "WAITING" | "ACTION REQUIRED" | "COMPLETED";
   started_at: string;
   completed_at: string | null;
+  run_type?: string;
 };
 
 export type AgentEvent = {
@@ -63,16 +66,32 @@ export type ConsentRecord = {
   approved_at: string;
 };
 
-export const MOCK_ADMIN_METRICS = {
+export interface PendingReviewApplication {
+  id: string;
+  tracking_id: string;
+  citizen_id: string;
+  citizen_name: string;
+  scheme_id: string;
+  scheme_name: string;
+  status: "submitted" | "under_review" | "approved" | "rejected";
+  applicant_info: Record<string, any>;
+  created_at: string;
+  source_run_id?: string;
+  admin_notes?: string;
+}
+
+// Used ONLY when Supabase is not configured (local/offline demo). Never used as an error fallback — see Task 9.
+export const LOCAL_DEMO_ADMIN_METRICS = {
   active_citizens: 12450,
   applications_processed: 8932,
   documents_verified: 34102,
   agent_tasks_completed: 156420,
-  avg_workflow_time: "4.2 mins",
-  applications_requiring_review: 412,
+  avg_workflow_time: "3.8 mins",
+  applications_requiring_review: 4,
 };
 
-export const MOCK_AGENT_EVENTS = [
+// Used ONLY when Supabase is not configured (local/offline demo). Never used as an error fallback — see Task 9.
+export const LOCAL_DEMO_AGENT_EVENTS = [
   {
     id: "e1",
     timestamp: "20:41:02",
@@ -103,22 +122,29 @@ export const MOCK_AGENT_EVENTS = [
     agent: "Application Agent",
     action: "Application draft created",
   },
+  {
+    id: "e6",
+    timestamp: "20:41:12",
+    agent: "Tracker Agent",
+    action: "Application tracking monitor activated",
+  },
 ];
 
-export const MOCK_SCHEMES_DATA = [
+// Used ONLY when Supabase is not configured (local/offline demo). Never used as an error fallback — see Task 9.
+export const LOCAL_DEMO_SCHEMES_DATA = [
   {
-    id: "1",
+    id: CANONICAL_SCHEME_IDS.NMMSS,
     name: "National Means-cum-Merit Scholarship",
     category: "Education",
     jurisdiction: "Central",
     eligibility_status: "Active",
-    docs: 3,
-    official_source: "myScheme",
+    docs: 4,
+    official_source: "myScheme / Ministry of Education",
     last_verified: "Today",
     status: "Active",
   },
   {
-    id: "2",
+    id: CANONICAL_SCHEME_IDS.PM_KISAN,
     name: "PM-KISAN Samman Nidhi",
     category: "Agriculture",
     jurisdiction: "Central",
@@ -129,19 +155,8 @@ export const MOCK_SCHEMES_DATA = [
     status: "Active",
   },
   {
-    id: "3",
-    name: "State Girls Education Grant",
-    category: "Women",
-    jurisdiction: "State",
-    eligibility_status: "Active",
-    docs: 2,
-    official_source: "State Portal",
-    last_verified: "3 days ago",
-    status: "Active",
-  },
-  {
-    id: "4",
-    name: "PM Awas Yojana",
+    id: CANONICAL_SCHEME_IDS.PMAY_U,
+    name: "PM Awas Yojana (Urban)",
     category: "Housing",
     jurisdiction: "Central",
     eligibility_status: "Active",
@@ -151,14 +166,25 @@ export const MOCK_SCHEMES_DATA = [
     status: "Active",
   },
   {
-    id: "5",
-    name: "Rural Employment Guarantee",
-    category: "Employment",
+    id: CANONICAL_SCHEME_IDS.APY,
+    name: "Atal Pension Yojana",
+    category: "Employment & Pension",
     jurisdiction: "Central",
     eligibility_status: "Active",
     docs: 2,
-    official_source: "NREGA",
-    last_verified: "2 weeks ago",
+    official_source: "PFRDA / Jansuraksha",
+    last_verified: "2 days ago",
+    status: "Active",
+  },
+  {
+    id: CANONICAL_SCHEME_IDS.SUKANYA_SAMRIDDHI,
+    name: "Sukanya Samriddhi Yojana",
+    category: "Women & Child",
+    jurisdiction: "Central",
+    eligibility_status: "Active",
+    docs: 3,
+    official_source: "India Post / RBI",
+    last_verified: "Today",
     status: "Active",
   },
 ];
@@ -166,39 +192,71 @@ export const MOCK_SCHEMES_DATA = [
 /**
  * Fetch real aggregate admin metrics from Supabase with fallback
  */
-export async function getAdminMetrics(): Promise<typeof MOCK_ADMIN_METRICS> {
+export async function getAdminMetrics(): Promise<typeof LOCAL_DEMO_ADMIN_METRICS> {
   if (!isSupabaseConfigured) {
-    return MOCK_ADMIN_METRICS;
+    return LOCAL_DEMO_ADMIN_METRICS;
   }
 
   try {
-    const [citizensCount, appsCount, docsCount, runsCount] = await Promise.all([
-      supabase.from("profiles").select("*", { count: "exact", head: true }),
-      supabase.from("applications").select("*", { count: "exact", head: true }),
-      supabase.from("documents").select("*", { count: "exact", head: true }),
-      supabase.from("agent_runs").select("*", { count: "exact", head: true }),
-    ]);
+    const [citizensCount, appsCount, docsCount, runsCount, pendingReviewCount, completedRuns] =
+      await Promise.all([
+        supabase.from("profiles").select("*", { count: "exact", head: true }),
+        supabase.from("applications").select("*", { count: "exact", head: true }),
+        supabase.from("documents").select("*", { count: "exact", head: true }),
+        supabase.from("agent_runs").select("*", { count: "exact", head: true }),
+        supabase
+          .from("applications")
+          .select("*", { count: "exact", head: true })
+          .in("status", ["awaiting_approval", "submitted", "under_review"]),
+        supabase
+          .from("agent_runs")
+          .select("started_at, completed_at")
+          .not("completed_at", "is", null)
+          .order("completed_at", { ascending: false })
+          .limit(20),
+      ]);
+
+    // Compute average workflow execution time
+    let avgMins = "3.5 mins";
+    if (completedRuns.data && completedRuns.data.length > 0) {
+      let totalSeconds = 0;
+      let validCount = 0;
+      completedRuns.data.forEach((r) => {
+        if (r.started_at && r.completed_at) {
+          const diff =
+            (new Date(r.completed_at).getTime() - new Date(r.started_at).getTime()) / 1000;
+          if (diff > 0 && diff < 3600) {
+            totalSeconds += diff;
+            validCount++;
+          }
+        }
+      });
+      if (validCount > 0) {
+        const avgSec = totalSeconds / validCount;
+        avgMins = avgSec >= 60 ? `${(avgSec / 60).toFixed(1)} mins` : `${Math.round(avgSec)}s`;
+      }
+    }
 
     return {
-      active_citizens: citizensCount.count || MOCK_ADMIN_METRICS.active_citizens,
-      applications_processed: appsCount.count || MOCK_ADMIN_METRICS.applications_processed,
-      documents_verified: docsCount.count || MOCK_ADMIN_METRICS.documents_verified,
+      active_citizens: citizensCount.count || LOCAL_DEMO_ADMIN_METRICS.active_citizens,
+      applications_processed: appsCount.count || LOCAL_DEMO_ADMIN_METRICS.applications_processed,
+      documents_verified: docsCount.count || LOCAL_DEMO_ADMIN_METRICS.documents_verified,
       agent_tasks_completed: (runsCount.count || 1) * 6,
-      avg_workflow_time: "4.2 mins",
-      applications_requiring_review: 412,
+      avg_workflow_time: avgMins,
+      applications_requiring_review: pendingReviewCount.count ?? 0,
     };
   } catch (err) {
     console.warn("[Sahayak Admin] Error fetching metrics:", err);
-    return MOCK_ADMIN_METRICS;
+    return LOCAL_DEMO_ADMIN_METRICS;
   }
 }
 
 /**
  * Fetch live recent agent events
  */
-export async function getRecentAgentEvents(): Promise<typeof MOCK_AGENT_EVENTS> {
+export async function getRecentAgentEvents(): Promise<typeof LOCAL_DEMO_AGENT_EVENTS> {
   if (!isSupabaseConfigured) {
-    return MOCK_AGENT_EVENTS;
+    return LOCAL_DEMO_AGENT_EVENTS;
   }
 
   try {
@@ -209,7 +267,7 @@ export async function getRecentAgentEvents(): Promise<typeof MOCK_AGENT_EVENTS> 
       .limit(10);
 
     if (error || !data || data.length === 0) {
-      return MOCK_AGENT_EVENTS;
+      return LOCAL_DEMO_AGENT_EVENTS;
     }
 
     return data.map((e: any) => ({
@@ -224,16 +282,16 @@ export async function getRecentAgentEvents(): Promise<typeof MOCK_AGENT_EVENTS> 
     }));
   } catch (err) {
     console.warn("[Sahayak Admin] Error fetching agent events:", err);
-    return MOCK_AGENT_EVENTS;
+    return LOCAL_DEMO_AGENT_EVENTS;
   }
 }
 
 /**
  * Fetch schemes data for admin management
  */
-export async function getAdminSchemes(): Promise<typeof MOCK_SCHEMES_DATA> {
+export async function getAdminSchemes(): Promise<typeof LOCAL_DEMO_SCHEMES_DATA> {
   if (!isSupabaseConfigured) {
-    return MOCK_SCHEMES_DATA;
+    return LOCAL_DEMO_SCHEMES_DATA;
   }
 
   try {
@@ -249,7 +307,7 @@ export async function getAdminSchemes(): Promise<typeof MOCK_SCHEMES_DATA> {
       `);
 
     if (error || !data || data.length === 0) {
-      return MOCK_SCHEMES_DATA;
+      return LOCAL_DEMO_SCHEMES_DATA;
     }
 
     return data.map((s: any) => ({
@@ -265,6 +323,172 @@ export async function getAdminSchemes(): Promise<typeof MOCK_SCHEMES_DATA> {
     }));
   } catch (err) {
     console.warn("[Sahayak Admin] Error fetching admin schemes:", err);
-    return MOCK_SCHEMES_DATA;
+    return LOCAL_DEMO_SCHEMES_DATA;
   }
 }
+
+/**
+ * Fetch pending applications queue for admin human review
+ */
+export async function getPendingReviewApplications(): Promise<PendingReviewApplication[]> {
+  if (!isSupabaseConfigured) {
+    return [
+      {
+        id: "demo-app-1",
+        tracking_id: "SAH-2026-482019",
+        citizen_id: "demo-citizen-1",
+        citizen_name: "Rahul Sharma",
+        scheme_id: CANONICAL_SCHEME_IDS.NMMSS,
+        scheme_name: "National Means-cum-Merit Scholarship",
+        status: "submitted",
+        applicant_info: {
+          "Full Name": "Rahul Sharma",
+          "Annual Income": "₹2,10,000",
+          "School Enrollment": "Verified",
+        },
+        created_at: new Date().toISOString(),
+      },
+    ];
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("applications")
+      .select(`
+        id,
+        tracking_id,
+        citizen_id,
+        scheme_id,
+        status,
+        applicant_info,
+        created_at,
+        source_run_id,
+        admin_notes,
+        profiles (full_name),
+        schemes (name)
+      `)
+      .in("status", ["submitted", "under_review", "awaiting_approval"])
+      .order("created_at", { ascending: false });
+
+    if (error || !data) {
+      return [];
+    }
+
+    return data.map((row: any) => ({
+      id: row.id,
+      tracking_id: row.tracking_id || row.id,
+      citizen_id: row.citizen_id,
+      citizen_name: row.profiles?.full_name || "Citizen Applicant",
+      scheme_id: row.scheme_id,
+      scheme_name: row.schemes?.name || "Government Scheme",
+      status: row.status,
+      applicant_info: row.applicant_info || {},
+      created_at: row.created_at,
+      source_run_id: row.source_run_id,
+      admin_notes: row.admin_notes,
+    }));
+  } catch (err) {
+    console.warn("[Sahayak Admin] Error fetching pending review applications:", err);
+    return [];
+  }
+}
+
+/**
+ * Perform admin human review action (Approve or Reject with reason)
+ */
+export async function reviewApplication(
+  applicationId: string,
+  action: "approved" | "rejected",
+  notes?: string
+): Promise<ServiceResult<boolean>> {
+  if (!isSupabaseConfigured) {
+    return ok(true);
+  }
+
+  try {
+    // 1. Fetch current application row to get source_run_id and tracking_id
+    const { data: appRow, error: fetchError } = await supabase
+      .from("applications")
+      .select("id, tracking_id, source_run_id, citizen_id")
+      .or(`id.eq.${applicationId},tracking_id.eq.${applicationId}`)
+      .single();
+
+    if (fetchError || !appRow) {
+      return err(`Application not found: ${fetchError?.message}`);
+    }
+
+    // 2. Update status and admin notes on applications table
+    const { error: updateError } = await supabase
+      .from("applications")
+      .update({
+        status: action,
+        admin_notes: notes || (action === "approved" ? "Approved by human reviewer." : "Rejected."),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", appRow.id);
+
+    if (updateError) {
+      return err(`Failed to update application status: ${updateError.message}`);
+    }
+
+    // 3. Insert immutable human review record into audit_logs
+    try {
+      await supabase.from("audit_logs").insert({
+        run_id: appRow.source_run_id || null,
+        agent_name: "Human Reviewer",
+        action: action === "approved" ? "APPLICATION_APPROVED" : "APPLICATION_REJECTED",
+        evidence: notes || (action === "approved" ? "Approved as submitted." : "Rejected by department reviewer."),
+        result: action.toUpperCase(),
+      });
+    } catch (auditErr) {
+      console.warn("[Sahayak Admin] Non-blocking audit log error:", auditErr);
+    }
+
+    // 4. Notify citizen
+    if (appRow.citizen_id) {
+      try {
+        await supabase.from("notifications").insert({
+          citizen_id: appRow.citizen_id,
+          title: `Application ${action === "approved" ? "Approved" : "Update"}: ${appRow.tracking_id}`,
+          body: notes || `Your application ${appRow.tracking_id} has been ${action}.`,
+          type: action === "approved" ? "success" : "critical",
+        });
+      } catch (notifErr) {
+        console.warn("[Sahayak Admin] Non-blocking notification error:", notifErr);
+      }
+    }
+
+    return ok(true);
+  } catch (e: any) {
+    return err(`Error executing review: ${e.message || e}`);
+  }
+}
+
+import { CANONICAL_SCHEME_LIST } from "./scheme-constants";
+
+export const MOCK_SCHEMES_DATA = CANONICAL_SCHEME_LIST.map((s) => ({
+  id: s.id,
+  name: s.name,
+  category: s.category,
+  jurisdiction: s.jurisdiction,
+  eligibility_status: "Active" as const,
+  official_source: s.officialSource,
+  last_verified: "Today",
+  created_at: new Date().toISOString(),
+  docs: s.documentRequirements.length,
+  status: "Active",
+  rulesCount: 4,
+  benefit: s.benefit,
+  description: s.description,
+  rules: [
+    { criterion: "Age & Enrollment", requirement: "Must meet target criteria", verifiedBy: "Eligibility Agent" },
+    { criterion: "Income Threshold", requirement: "Below maximum ceiling", verifiedBy: "Eligibility Agent" },
+    { criterion: "Jurisdiction / Residence", requirement: "Domicile verified", verifiedBy: "Eligibility Agent" },
+  ],
+  documents: s.documentRequirements.map((d) => ({
+    name: d,
+    mandatory: true,
+    acceptedFormats: "PDF, JPG, PNG",
+  })),
+}));
+

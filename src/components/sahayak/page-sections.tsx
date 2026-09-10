@@ -3,9 +3,7 @@ import { ArrowRight, CheckCircle2, ChevronRight, Clock3, FileCheck2, Sparkles } 
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { StatusBadge } from "./components";
-import type { Status } from "@/lib/mock-data";
+import { StatusBadge, type Status } from "./components";
 
 export function PageHeader({
   eyebrow,

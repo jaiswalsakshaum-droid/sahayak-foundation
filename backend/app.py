@@ -15,10 +15,10 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 
 try:
-    from agent_graph import sahayak_agent_workflow, write_agent_event
+    from agent_graph import sahayak_agent_workflow, write_agent_event, tracker_agent_node
     from document_extractor import extract_document_data
 except ImportError:
-    from backend.agent_graph import sahayak_agent_workflow, write_agent_event
+    from backend.agent_graph import sahayak_agent_workflow, write_agent_event, tracker_agent_node
     from backend.document_extractor import extract_document_data
 
 load_dotenv()
@@ -196,21 +196,56 @@ async def extract_document(
         "message": "Document intelligence extraction initiated.",
     }
 
-@app.post("/track")
-def track_submission(
-    req: TrackRequest,
+class TrackerRunRequest(BaseModel):
+    citizen_id: Optional[str] = Field(default=None, description="Optional citizen UUID to scope sweep")
+    run_id: Optional[str] = Field(default=None, description="Optional agent run UUID for audit trail")
+
+@app.post("/tracker/run", status_code=status.HTTP_200_OK)
+def run_tracker_sweep(
+    req: TrackerRunRequest,
     _: bool = Depends(verify_internal_secret),
 ):
-    """Tracker Agent endpoint triggered on application submission."""
-    if supabase_admin:
+    """
+    Executes a Tracker Agent sweep to monitor submitted applications,
+    calculate SLA timelines, write agent events, and notify citizens.
+    """
+    import time
+    run_id = req.run_id
+    if not run_id and supabase_admin and req.citizen_id:
         try:
-            supabase_admin.table("notifications").insert({
+            ins = supabase_admin.table("agent_runs").insert({
                 "citizen_id": req.citizen_id,
-                "title": f"Application submitted: {req.scheme_name}",
-                "body": f"Tracking ID: {req.tracking_id}. Tracker Agent is now monitoring department review.",
-                "type": "info",
+                "input_query": "tracker-sweep",
+                "status": "PROCESSING",
+                "run_type": "tracker_sweep",
             }).execute()
+            if ins.data:
+                run_id = ins.data[0]["id"]
         except Exception as e:
-            logger.warning(f"Error creating tracker notification: {e}")
+            logger.warning(f"Error creating agent_run for tracker sweep: {e}")
 
-    return {"status": "success", "message": "Tracker agent monitoring activated."}
+    state_payload = {
+        "run_id": run_id or "",
+        "citizen_id": req.citizen_id or "",
+        "query": "tracker-sweep",
+        "citizen_profile": {},
+        "retry_count": 0,
+    }
+    result = tracker_agent_node(state_payload)
+
+    if run_id and supabase_admin:
+        try:
+            supabase_admin.table("agent_runs").update({
+                "status": "COMPLETED",
+                "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }).eq("id", run_id).execute()
+        except Exception as e:
+            logger.warning(f"Error completing tracker agent_run: {e}")
+
+    return {
+        "status": "success",
+        "run_id": run_id,
+        "message": "Tracker sweep executed successfully.",
+        "result": result,
+    }
+

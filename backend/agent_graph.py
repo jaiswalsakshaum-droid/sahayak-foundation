@@ -69,17 +69,26 @@ if GROQ_API_KEY:
 # Helper Functions: Supabase Writes & LLM Retries
 # ==============================================================================
 
-def write_agent_event(run_id: str, agent_name: str, action: str, details: Dict[str, Any] = None):
+def write_agent_event(
+    run_id: str,
+    agent_name: str,
+    action: str,
+    details: Optional[Dict[str, Any]] = None,
+    event_code: Optional[str] = None,
+):
     """Inserts a real-time event into public.agent_events."""
     logger.info(f"[{agent_name}] {action}")
     if not supabase_admin or not run_id:
         return
+    payload_details = dict(details or {})
+    if event_code and "event_code" not in payload_details:
+        payload_details["event_code"] = event_code
     try:
         supabase_admin.table("agent_events").insert({
             "run_id": run_id,
             "agent_name": agent_name,
             "action": action,
-            "details": details or {},
+            "details": payload_details,
         }).execute()
     except Exception as e:
         logger.warning(f"Error writing agent_event: {e}")
@@ -607,6 +616,7 @@ def application_agent_node(state: SahayakState) -> Dict[str, Any]:
                 "status": "awaiting_approval",
                 "applicant_info": applicant_info,
                 "tracking_id": draft_id,
+                "source_run_id": run_id,
             }, on_conflict="citizen_id,scheme_id").execute()
             logger.info(f"Persisted application draft {draft_id} for citizen_id={citizen_id}")
         except Exception as e:
@@ -623,7 +633,8 @@ def application_agent_node(state: SahayakState) -> Dict[str, Any]:
         run_id,
         "Application Agent",
         f"Application draft #{draft_id} created and ready for citizen approval.",
-        {"application_draft": application_draft}
+        {"application_draft": application_draft, "event_code": "APPLICATION_DRAFT_CREATED"},
+        event_code="APPLICATION_DRAFT_CREATED",
     )
 
     # Update agent_runs status to COMPLETED
@@ -637,6 +648,92 @@ def application_agent_node(state: SahayakState) -> Dict[str, Any]:
             logger.error(f"Error updating agent_run status: {e}")
 
     return {"application_draft": application_draft}
+
+def tracker_agent_node(state: SahayakState) -> Dict[str, Any]:
+    """
+    Tracker Agent Node: Deterministic status-transition watcher & next-best-action generator.
+    Scans submitted/under_review applications, records progress events, checks SLA delays,
+    and returns next action guidance.
+    """
+    run_id = state.get("run_id")
+    citizen_id = state.get("citizen_id")
+
+    write_agent_event(
+        run_id,
+        "Tracker Agent",
+        "Scanning active application review statuses across government departments...",
+        event_code="TRACKER_SWEEP_STARTED",
+    )
+
+    if not supabase_admin:
+        return {"next_action": {"type": "status_check", "description": "Tracker Agent active."}}
+
+    try:
+        query = supabase_admin.table("applications").select("*, schemes(name)")
+        if citizen_id:
+            query = query.eq("citizen_id", citizen_id)
+        res = query.in_("status", ["submitted", "under_review"]).execute()
+        apps = res.data or []
+
+        for app_row in apps:
+            app_citizen = app_row.get("citizen_id") or citizen_id
+            tracking_id = app_row.get("tracking_id", "Unknown")
+            scheme_name = (app_row.get("schemes") or {}).get("name") or "Government Scheme"
+            created_at_str = app_row.get("created_at")
+            days_since = 1
+            if created_at_str:
+                try:
+                    from datetime import datetime, timezone
+                    created_dt = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+                    days_since = max(1, (datetime.now(timezone.utc) - created_dt).days)
+                except Exception:
+                    days_since = 1
+
+            status_label = "under departmental review" if app_row.get("status") == "under_review" else "submitted"
+            action_text = f"Application {tracking_id} ({scheme_name}) is {status_label} (Day {days_since})."
+            write_agent_event(
+                run_id,
+                "Tracker Agent",
+                action_text,
+                {
+                    "event_code": "TRACKER_STATUS_CHECK",
+                    "tracking_id": tracking_id,
+                    "days_since_submission": days_since,
+                    "status": app_row.get("status"),
+                },
+                event_code="TRACKER_STATUS_CHECK",
+            )
+
+            # SLA escalation check (nudge if pending review > 10 days)
+            if days_since > 10 and app_row.get("status") == "submitted" and app_citizen:
+                try:
+                    supabase_admin.table("notifications").insert({
+                        "citizen_id": app_citizen,
+                        "title": f"Review SLA Notice: {scheme_name}",
+                        "body": f"Application {tracking_id} has reached Day {days_since} of departmental review. Tracker Agent is monitoring for updates.",
+                        "type": "warning",
+                    }).execute()
+                except Exception as ne:
+                    logger.warning(f"Error inserting tracker SLA notification: {ne}")
+
+    except Exception as e:
+        logger.error(f"Error running tracker agent sweep: {e}")
+
+    next_action = {
+        "type": "tracker_monitoring",
+        "description": "Tracker Agent is actively monitoring department review timelines and SLA checkpoints.",
+        "agent": "Tracker Agent",
+    }
+
+    write_agent_event(
+        run_id,
+        "Tracker Agent",
+        "Tracker Agent sweep completed. Monitoring active.",
+        {"next_action": next_action, "event_code": "TRACKER_SWEEP_COMPLETED"},
+        event_code="TRACKER_SWEEP_COMPLETED",
+    )
+
+    return {"next_action": next_action}
 
 # ==============================================================================
 # Graph Routing & Compilation

@@ -1,0 +1,683 @@
+# SAHAYAK — Frontend Completion & Hardening — Master Implementation Prompt
+
+> Paste this entire document as one instruction to your coding agent (Claude Code, Cursor,
+> Lovable, etc.) working inside the `jaiswalsakshaum-droid-sahayak-foundation` repo. It is
+> written to be self-contained: it describes the current state of the codebase, the exact
+> gaps, and the exact acceptance criteria for each fix — so the agent does not need to
+> re-discover context and cannot "guess" its way into breaking the working backend.
+
+---
+
+## 0. Non-negotiable ground rules (read first, obey always)
+
+1. **Do not touch, weaken, or restructure the backend orchestration logic** in
+   `backend/agent_graph.py`, `backend/app.py`, `backend/state.py`,
+   `backend/document_extractor.py`, or the Supabase Edge Functions
+   (`supabase/functions/extract-document`, `supabase/functions/orchestrate-agent-run`,
+   `supabase/functions/seed-demo-data`) **except** where a task below explicitly asks you
+   to extend them (e.g. adding the Tracker Agent node). These already implement real Groq
+   LLM calls, real Supabase Postgres reads/writes, JWT validation, and an
+   `X-Sahayak-Internal-Secret` check. They are the audited "Phase 1–4" work described in
+   `phase4response.txt` and the `docs/` folder — treat that document as ground truth for
+   what is already real vs. simulated.
+2. **Never remove or downgrade Row Level Security (RLS).** Every schema change must ship
+   as a new, additive Supabase migration file under `supabase/migrations/`, never by
+   editing `20260910000000_phase1_schema.sql` in place. RLS policies are only ever made
+   *more* restrictive, never opened up, unless a task explicitly says so.
+3. **Preserve all existing routes, URLs, and the TanStack Router file-based routing
+   convention** (`src/routes/*.tsx`). Do not rename routes. Do not change the
+   `AppShell` / `sahayak` design system components without a stated reason.
+4. **Preserve the "hybrid safety layer" pattern**: every place data can come from Supabase
+   should still degrade gracefully to a clearly-labeled fallback/error state when Supabase
+   is unreachable — but that fallback must now be an explicit "offline / degraded" UI
+   state, never a silent swap to invented numbers (see §9, "trustworthy failure handling").
+5. **No feature in this prompt may regress another.** After every task, run
+   `bun run lint` (or `npm run lint`), `bun run build`, and the new test suite (§10) before
+   moving to the next task. If a task cannot be completed without breaking another, stop
+   and flag it instead of guessing.
+6. Commit in small, reviewable chunks, one per numbered task below, with descriptive
+   commit messages referencing the task number (e.g. `feat(dashboard): replace mock-data
+   with live Supabase session + profile [Task 2]`).
+
+---
+
+## 1. Current state summary (why each task exists)
+
+This is a TanStack Start + React 19 + Supabase + LangGraph/Groq app. The backend
+(`backend/agent_graph.py`) already runs a real 5-node LangGraph workforce (Citizen →
+Scheme → Eligibility → Document → Application agents) against live Groq models and a real
+Postgres schema with RLS. Confirmed, already real:
+
+- `src/lib/auth.ts` — real Supabase Auth session/sign-in/sign-up, with a documented
+  local-fallback demo mode when `VITE_SUPABASE_URL` is not configured.
+- `src/hooks/use-agent-run.ts` — real Supabase Realtime subscriptions to `agent_events`
+  and `agent_runs`, with a 9s safety timeout.
+- `src/lib/services.ts` and `src/lib/admin-services.ts` — real Supabase queries with
+  fallback constants when Supabase is unreachable.
+- `supabase/migrations/20260910000000_phase1_schema.sql` — real schema + RLS.
+
+Confirmed, still fake / incomplete (these map 1:1 to your 🔴/🟠 list):
+
+| Your item | File(s) | Problem found |
+|---|---|---|
+| 🔴 Real dashboard | `src/routes/dashboard.tsx` | Hardcodes "Good afternoon, Rahul", age/location/income text, and imports `applications`, `activity`, `notifications` directly from `src/lib/mock-data.ts` instead of querying Supabase for the logged-in user. |
+| 🔴 Real analytics | `src/routes/analytics.tsx` | Every chart (`appsByStageData`, `docVolumeData`, `agentTaskData`, `completionRateData`) and `MOCK_ADMIN_METRICS` is a hardcoded constant. No Supabase query exists on this page at all. |
+| 🔴 Real human approval/submission | `src/routes/applications.$id.tsx`, `src/lib/services.ts` | `recordConsent()` and `submitApplication()` exist and write to Supabase, but there is no route/UI that actually calls them from a citizen clicking "Approve & Submit" wired to a real draft; the assistant flow's "Upload Missing Document" button in the scheme detail dialog is a dead `<Button>` with no `onClick`. |
+| 🔴 Tracker Agent | `backend/agent_graph.py`, `src/lib/mock-data.ts` | `mock-data.ts` and the dashboard header ("6 agents coordinated") both advertise a 6th "Tracker Agent", but `agent_graph.py` only defines 5 nodes (citizen, scheme, eligibility, document, application). The agent that is supposed to watch `applications.status` after submission does not exist anywhere in the backend graph. |
+| 🔴 Removal of Assistant simulation timers | `src/routes/assistant.tsx` | `handleSend()` calls the real `startRun()` from `useAgentRun`, **and then** unconditionally schedules four `setTimeout` blocks (2000ms/4500ms/7000ms/9500ms) that inject fake step messages regardless of whether real events arrived. `MOCK_SCHEMES` is also hardcoded and shown instead of the real `candidate_schemes` from the run. |
+| 🔴 Seed/data/schema consistency | `supabase/seed.sql` vs `src/lib/services.ts` vs `src/lib/admin-services.ts` vs `src/lib/mock-data.ts` | Four different, non-overlapping ID/shape schemes exist: seed.sql UUIDs (`a0000000-...-0001` etc.), `FALLBACK_SCHEMES_DB` in `services.ts` (same UUIDs, different field names), `MOCK_SCHEMES_DATA` in `admin-services.ts` (numeric string ids `"1".."5"`, different scheme set incl. "Rural Employment Guarantee" which does not exist in seed.sql), and `mock-data.ts` (`"nmmse"`, `"hostel"`, `"pds"` slug ids, a completely different fictional set). Anything reading fallback data will disagree with anything reading seed data. |
+| 🔴 Agent-event write security | `supabase/migrations/20260910000000_phase1_schema.sql` (`agent_events_insert_all` policy) | The policy allows **any authenticated citizen** to `INSERT` into `agent_events` for a `run_id` they own — i.e., a citizen's browser JWT can forge fake agent messages/timeline entries for their own run, impersonating the AI workforce. Only the backend service role (`backend/agent_graph.py`, via `SUPABASE_SERVICE_ROLE_KEY`) should ever be able to write to `agent_events`. |
+| 🟠 Trustworthy failure handling | Everywhere `console.warn(...)` swallows a Supabase error and silently falls back | Failures are invisible to the user (e.g. `validateDocument` silently returns a fabricated "Aadhaar Card / Rahul Sharma" result if the DB insert fails) and invisible to operators (no error reporting beyond `console.warn`). |
+| 🟠 Legacy mock services cleanup | `src/lib/mock-data.ts`, `MOCK_SCHEMES` in `assistant.tsx`, `MOCK_ADMIN_METRICS`/`MOCK_SCHEMES_DATA`/`MOCK_AGENT_EVENTS` in `admin-services.ts`, `DEMO_PROFILE` in `auth.ts` | Multiple parallel fake data sources are imported directly into production render paths instead of being isolated behind one clearly-named "demo/offline mode" boundary. |
+| 🟠 Automated/E2E testing | `package.json` | Zero test tooling installed (no `vitest`, `@testing-library/react`, `playwright`, or `pgTAP`), zero `test` script, zero test files anywhere in the repo. |
+| Documents ask / multi-language | `src/routes/documents.tsx`, whole app | Document upload UI exists but is not part of a guided "give us your documents" onboarding flow tied to a specific scheme's `document_requirements`; there is no i18n anywhere (`grep i18n` returns nothing) — all copy is hardcoded English JSX strings, `<html lang="en">` is static in `src/router.tsx`/`src/routes/__root.tsx`. |
+
+---
+
+## 2. Task 1 — Multi-language support (English, Hindi, Bengali, Marathi, Telugu, Tamil)
+
+**Goal:** every citizen-facing screen (not the admin console, which can stay English-only
+for v1) is fully translatable and defaults to the browser/OS language when supported,
+otherwise English, with a persistent user-chosen override.
+
+1. Add `react-i18next` + `i18next` + `i18next-browser-languagedetector` to
+   `package.json` dependencies (do not add heavier i18n frameworks; this stack is the
+   lightest fit for TanStack Start + Vite).
+2. Create `src/i18n/` with:
+   - `src/i18n/index.ts` — i18next init, `supportedLngs: ['en','hi','bn','mr','te','ta']`,
+     `fallbackLng: 'en'`, language detector reading `localStorage` key
+     `sahayak_lang` first, then `navigator.language`.
+   - `src/i18n/locales/en/common.json`, `hi/common.json`, `bn/common.json`,
+     `mr/common.json`, `te/common.json`, `ta/common.json` — one namespace `common` to
+     start, containing every hardcoded string currently in:
+     `src/routes/dashboard.tsx`, `assistant.tsx`, `documents.tsx`, `applications.index.tsx`,
+     `applications.$id.tsx`, `schemes.tsx`, `notifications.tsx`, `profile.tsx`, `login.tsx`,
+     `signup.tsx`, `index.tsx`, and `src/components/sahayak/*.tsx`.
+   - Use proper native scripts for translations (Devanagari for Hindi/Marathi, Bengali
+     script, Telugu script, Tamil script) — do not transliterate into Latin characters.
+     Numbers/currency stay in the `₹` / Indian numbering convention for all locales.
+3. Replace every hardcoded JSX string in the files above with `t('key')` via
+   `useTranslation()`. Do **not** touch copy inside `backend/` (server-side LLM prompts
+   stay in English — the LLM system prompts are not user-facing).
+4. Add a `LanguageSwitcher` component in `src/components/sahayak/components.tsx`,
+   rendered in `AppShell`'s top bar (citizen layout) and in `login.tsx`/`signup.tsx` before
+   authentication, so language can be picked before login. Persist the choice to
+   `localStorage.sahayak_lang` and, if authenticated, also patch it onto
+   `profiles.preferred_language` (see migration below) so it round-trips across devices.
+5. **New additive migration** `supabase/migrations/<timestamp>_add_preferred_language.sql`:
+   ```sql
+   alter table public.profiles
+     add column if not exists preferred_language text not null default 'en'
+     check (preferred_language in ('en','hi','bn','mr','te','ta'));
+   ```
+6. Update `src/routes/__root.tsx` (or wherever `<html lang="en">` is set) to set
+   `lang` dynamically from the active i18next language, and set `dir="ltr"` explicitly
+   (all six languages are LTR, so no RTL work is needed, but keep the attribute explicit
+   for future languages).
+7. Any AI-generated **citizen-facing** text that currently comes from the backend (agent
+   event `action` strings written by `write_agent_event(...)` in `agent_graph.py`, and
+   LLM `explanation`/`message` fields) should stay in English at the data layer, but the
+   frontend must wrap the *fixed-shape* system messages (e.g. "Application draft #{id}
+   created and ready for citizen approval.") in a translation lookup table keyed by a
+   stable `event_code` rather than trying to machine-translate free-form LLM text live.
+   Concretely: extend `backend/agent_graph.py`'s `write_agent_event` calls to also pass a
+   short stable `event_code` (e.g. `"APPLICATION_DRAFT_CREATED"`) in the `details` jsonb
+   payload alongside the existing English `action` string (additive field, do not remove
+   `action`). The frontend's `ActivityList`/journey step renderer looks up
+   `details.event_code` in the i18n bundle first and falls back to the raw `action` string
+   if no `event_code` is present (covers old rows and truly dynamic LLM prose).
+
+**Acceptance criteria:** switching the language selector immediately re-renders the
+dashboard, assistant, documents, applications, schemes, notifications, and profile pages
+in the chosen language with no page reload; refreshing the page keeps the chosen language;
+an unauthenticated visitor can pick a language on `/login` before signing in.
+
+---
+
+## 3. Task 2 — Real dashboard (`src/routes/dashboard.tsx`)
+
+1. Remove the imports of `applications`, `activity`, `notifications` from
+   `@/lib/mock-data` entirely from this route.
+2. In `beforeLoad`, after `await requireAuth()`, also call
+   `const profile = await getCurrentProfile()` (already exported from `src/lib/auth.ts`)
+   and pass it into the route's loader data (TanStack Router `loader`/`beforeLoad` return
+   value, or a small `useEffect` + `useState` inside `DashboardPage` if the router version
+   in this repo does not support returning context — check `router.tsx` for the pattern
+   already used elsewhere before choosing).
+3. Replace the header:
+   - `Good afternoon, Rahul` → localized greeting (`t('dashboard.greeting', { name:
+     profile.full_name.split(' ')[0] })`) using the **actual logged-in user's** first
+     name from `profiles.full_name`. Vary "Good morning / afternoon / evening" based on
+     local time of day.
+   - The subtitle line (age · location · occupation · income) must be built from
+     `profile.age`, `profile.location`, `profile.occupation`, `profile.annual_income` —
+     render "—" or a "complete your profile" prompt for any field that is `null`, never a
+     hardcoded fallback value.
+4. Replace the four `MetricCard`s with real aggregates scoped to the **current citizen only**
+   (not the platform-wide numbers used in `admin-services.ts`):
+   - "Benefits discovered" = count of rows in `schemes` the citizen has an `agent_events`
+     match for, or (simpler, acceptable v1) count of distinct `scheme_id`s referenced by
+     the citizen's `applications` + latest `agent_runs.candidate_schemes` details blob.
+   - "Applications in progress" = `count(applications where citizen_id = me and status in
+     ('draft','awaiting_approval','submitted','under_review'))`, with "needs action" badge
+     if any is `awaiting_approval`.
+   - "Documents verified" = `count(documents where citizen_id = me and status='verified')
+     / count(documents where citizen_id = me)` (guard divide-by-zero → show "0/0", not
+     a hardcoded "5/6").
+   - "Actions required" = count of `applications.status = 'awaiting_approval'` +
+     count of missing mandatory `document_requirements` for the citizen's active
+     applications (reuse the same set-difference logic already implemented in
+     `document_agent_node` in `agent_graph.py` — do not reimplement it differently on the
+     frontend; if useful, expose it via a small Supabase view — see Task 3 below).
+5. `ApplicationRow` list, `ActivityList`, and `NotificationCard` list must all be fed from
+   real Supabase queries (`applications` table for the citizen, `agent_events` ordered by
+   `created_at desc` for the citizen's most recent `agent_runs`, and the new `notifications`
+   table which already exists in the schema but is currently unused by the frontend).
+6. If any query fails or the citizen has zero real data yet (first-time login, empty
+   state), render a proper **empty state** ("You haven't started a journey yet — talk to
+   the assistant") with a CTA to `/assistant`, never mock rows. This is different from a
+   Supabase *connection* failure, which must render the degraded-state banner from §9.
+7. `ProgressStepper` and `NextBestAction` currently import synthetic step arrays from
+   `mock-data.ts`/inline; wire them to derive from the citizen's most advanced
+   `agent_runs`/`applications` row instead (reuse the `getApplicationStatus()` timeline
+   logic in `services.ts` as the single source of truth for step state everywhere it's
+   needed on this page).
+
+**Acceptance criteria:** two different citizen accounts logged in in two browsers see two
+different names, two different metric sets, and two different application lists — nothing
+on the page is shared/hardcoded. A brand-new signup sees an honest empty state, not
+"Rahul Sharma" data.
+
+---
+
+## 4. Task 3 — Real analytics (`src/routes/analytics.tsx`)
+
+1. Delete `appsByStageData`, `docVolumeData`, `agentTaskData`, `completionRateData`, and
+   the import of `MOCK_ADMIN_METRICS` from this file.
+2. Add a `src/lib/analytics-services.ts` module (new file, mirrors the pattern already
+   used in `admin-services.ts`) exposing:
+   - `getApplicationsByStage(): Promise<{ name: string; count: number }[]>` — real
+     `group by status` count over `public.applications`.
+   - `getDocumentVolumeByDay(days = 7): Promise<{ name: string; count: number }[]>` —
+     real `group by date_trunc('day', uploaded_at)` count over `public.documents`
+     for the trailing N days.
+   - `getAgentTaskDistribution(): Promise<{ name: string; value: number }[]>` — real
+     `group by agent_name` count over `public.agent_events`.
+   - `getCompletionRateByMonth(months = 6): Promise<{ name: string; rate: number }[]>` —
+     real `(count(status='approved') / count(*)) * 100` per month over `public.applications`.
+   These can be plain Postgres queries via the JS client (`.select()` + client-side
+   grouping is acceptable for v1 given expected data volume; if you prefer, ship them as
+   Postgres **views** or **RPC functions** in a new migration
+   `supabase/migrations/<timestamp>_analytics_views.sql` and call
+   `supabase.rpc('get_applications_by_stage')` etc. — prefer the RPC/view approach since it
+   keeps aggregation logic auditable in SQL and reusable by the admin RLS-safe path.
+3. All four must be `requireAdmin()`-gated at the query layer too (not just the route
+   `beforeLoad`) — i.e. wrap them in RPC functions marked `security definer` with an
+   explicit `if not public.is_admin() then raise exception ...` guard, so a non-admin
+   token can never call them directly even if they bypass the frontend route guard.
+4. Update `getAdminMetrics()` in `admin-services.ts` similarly: `applications_requiring_review`
+   is currently a hardcoded `412` even in the "real" path — replace with
+   `count(applications where status = 'awaiting_approval')`, and `avg_workflow_time`
+   with a real computation (`avg(completed_at - started_at)` over completed `agent_runs`
+   in the trailing 24h, formatted as `"X.Y mins"`).
+5. Wire the four chart components to the four new query functions via
+   `@tanstack/react-query` (already a dependency) for caching/loading/error states — do
+   not fetch directly in `useEffect`.
+6. Every chart must render an explicit loading skeleton and an explicit "no data yet" /
+   "couldn't load analytics" state — never silently show an empty chart or fall back to
+   the old mock arrays.
+
+**Acceptance criteria:** `/analytics` numbers move when you insert/approve real rows in
+the DB (verifiable by running the E2E seed from Task 10 and comparing before/after
+screenshots or query counts). No `MOCK_*` identifier remains imported in this file.
+
+---
+
+## 5. Task 4 — Real human approval / submission flow
+
+This spans citizen-side approval and admin-side review; both must be wired end-to-end.
+
+### 5a. Citizen approval (new route: `src/routes/applications.$id.tsx` enhancement)
+
+1. On load, fetch the real `applications` row (by `tracking_id` or `id`) for the citizen,
+   including `applicant_info` and joined `application_documents` → `documents`.
+2. Render every `applicant_info` field with its `status` (`verified` / `needs_review` /
+   `missing`) exactly as already modeled in `ApplicationDraft` in `services.ts` — this
+   type already exists, just needs a real consuming UI.
+3. Add an explicit **consent + approve** control: a checkbox ("I have reviewed this
+   information and consent to sharing it with the relevant government department") that
+   must be checked before the "Approve & Submit" button enables. On click:
+   - call `recordConsent(applicationId)` (already implemented, writes to
+     `consent_records`),
+   - then call `submitApplication(applicationId)` (already implemented, sets
+     `applications.status = 'submitted'`),
+   - show a success toast (the repo already depends on `sonner`) with the returned
+     `trackingId`,
+   - refresh the application status/timeline in place (no full reload).
+4. Disable the approve control entirely (with an explanatory message) while any mandatory
+   document for this application is still `missing`/`needs_review` — pull this from the
+   real `document_requirements` vs `documents` set-difference, matching backend logic in
+   `document_agent_node`.
+5. In `assistant.tsx`'s scheme-detail dialog, wire the dead `<Button>Upload Missing
+   Document</Button>` to actually navigate to `/documents?required=<document_type>&scheme=<scheme_id>`
+   (see Task 11) instead of doing nothing.
+
+### 5b. Admin human review (extend `src/routes/admin.index.tsx` or add
+`src/routes/admin.applications.tsx` if it doesn't exist — check first)
+
+1. Add a queue view listing `applications where status = 'submitted' or status =
+   'under_review'`, each row showing citizen name, scheme, submitted date, and a
+   direct link into a detail view of that application's `applicant_info` +
+   `documents` + the full `audit_logs` trail for its originating `agent_runs.id`
+   (traceable via `applications` → need a `run_id` reference — see schema note below).
+2. **Schema note:** `applications` currently has no FK back to the `agent_runs` that
+   produced it. Add, additively:
+   ```sql
+   alter table public.applications
+     add column if not exists source_run_id uuid references public.agent_runs(id);
+   ```
+   and set it in `application_agent_node` in `agent_graph.py` when it `upsert`s the
+   application row (`"source_run_id": run_id`), so the admin console can always show the
+   exact eligibility/audit trail behind a submitted application (this is the "real human
+   approval" traceability the audit doc already promises for `audit_logs` — right now
+   nothing links an `application` row back to it).
+3. Give the admin two real actions on a submitted application: **Approve** (
+   `status → 'approved'`) and **Reject** (`status → 'rejected'`, with a required
+   free-text reason stored in a new `admin_notes` jsonb/text column — additive migration).
+   Both actions must write an `audit_logs` row (`agent_name: 'Human Reviewer'`,
+   `result: 'APPROVED'|'REJECTED'`, `evidence: <reason or "approved as submitted">`) so
+   human decisions live in the same immutable trail as agent decisions.
+4. These admin mutations must go through Supabase directly with the admin's own JWT
+   (RLS already allows `public.is_admin()` on `applications` `for all`) — no new backend
+   endpoint is required for this part.
+
+**Acceptance criteria:** a citizen can take an `awaiting_approval` draft all the way to
+`submitted` through real UI clicks, an admin can see it appear in a real queue, and can
+approve/reject it with a persisted, auditable reason — none of this is simulated or
+`setTimeout`-based.
+
+---
+
+## 6. Task 5 — Tracker Agent (backend + frontend, closes the loop after submission)
+
+Right now the workforce stops at `application_agent → END`. Nothing watches a
+`submitted`/`under_review` application afterward, even though the dashboard header claims
+"6 agents coordinated" and `mock-data.ts` already describes a "Tracker Agent — watches the
+journey, monitors source portals, tells you the next best action."
+
+1. **Backend** (`backend/agent_graph.py`):
+   - Add a new node `tracker_agent_node(state)` that:
+     - Runs for applications with `status in ('submitted','under_review')` belonging to
+       the citizen.
+     - Since there is no real external government portal to poll in this environment,
+       implement it as a deterministic **status-transition watcher + next-best-action
+       generator**: it re-reads the application's current `status`, computes "days since
+       submission", and (a) writes an `agent_event` summarizing current state
+       ("Application SAH-2026-xxxxxx has been under review for 6 days."), (b) if
+       `days_since_submission > N` (configurable, default 10) and status is still
+       `submitted`, escalates by inserting a `notifications` row of type `warning`
+       nudging the citizen, and (c) always returns a `next_best_action` payload (reuse the
+       existing `NextAction`/`generateNextAction` shape from `services.ts` so frontend and
+       backend agree on the contract — move that shape into `backend/state.py` as a
+       Pydantic model `TrackerUpdate` mirroring it, since `state.py` already houses the
+       other structured Pydantic contracts like `EligibilityResult`).
+     - Add this as a **new, separate LangGraph entry point** invoked on a schedule (not
+       inline in the citizen's live orchestration run, since tracking happens *after* a
+       run completes) — expose it as a new FastAPI route in `backend/app.py`, e.g.
+       `POST /tracker/run` guarded by the same `X-Sahayak-Internal-Secret` header check
+       already used for `/run` and `/extract-document`, callable by:
+       - a new Supabase Edge Function `supabase/functions/tracker-sweep/index.ts`
+         (mirrors the auth/secret pattern of `orchestrate-agent-run/index.ts`) that can be
+         invoked either manually by an admin action or via a `pg_cron`/Supabase Scheduled
+         Function (document both options in `README.md`; scheduled cron is preferred for
+         "real" behavior but manual admin trigger is an acceptable v1 fallback — do not
+         silently skip this, pick one and implement it fully).
+   - Update `write_agent_event` calls project-wide to use `"Tracker Agent"` as the
+     `agent_name` for these events so the frontend's existing agent-name string matching
+     (`agentLower.includes("tracker")`) lights up correctly — **note**: `use-agent-run.ts`
+     and `assistant.tsx` currently only map `citizen/scheme/eligibility/document/application`
+     to step indices 0–4; extend both to a 6th step index for `"tracker"`.
+2. **Schema:** no new tables needed; Tracker Agent reuses `agent_runs` (create a fresh
+   lightweight `agent_runs` row per sweep, `input_query: 'tracker-sweep'`, or add a nullable
+   `run_type text default 'citizen_interaction' check (run_type in
+   ('citizen_interaction','tracker_sweep'))` column — additive migration — so tracker rows
+   are distinguishable from citizen-initiated runs in the admin analytics from Task 3).
+3. **Frontend:**
+   - `src/lib/mock-data.ts`'s `agents` array already has the right *copy* for the Tracker
+     Agent card — once `mock-data.ts` is otherwise retired (Task 9), move just this
+     agent-roster descriptive data (name/purpose/description per agent, used for the
+     "AI Workforce" explainer on `admin.agents.tsx` and any "meet your agents" citizen UI)
+     into a small `src/lib/agent-roster.ts` constant that's explicitly documented as
+     **static descriptive copy, not live status** — and add the Tracker Agent's live
+     status (from real `agent_events`) next to it, clearly distinguishing "what this agent
+     does" (static) from "what it's doing right now" (live).
+   - Dashboard's "6 agents coordinated" badge (Task 2) now becomes true because a 6th
+     agent genuinely exists and reports events.
+
+**Acceptance criteria:** after an application is submitted, triggering a tracker sweep
+(manually via the admin console button, at minimum) produces a real new `agent_events` row
+with `agent_name = 'Tracker Agent'`, visible live in the citizen's dashboard activity feed
+and (if escalation conditions are met) a real `notifications` row.
+
+---
+
+## 7. Task 6 — Remove Assistant simulation timers (`src/routes/assistant.tsx`)
+
+1. Delete all four `setTimeout` blocks inside `handleSend` (the 2000/4500/7000/9500ms
+   ones) and the `MOCK_SCHEMES` constant entirely.
+2. The journey-step UI must be driven **exclusively** by `events`/`status`/
+   `activeAgentIndex` from `useAgentRun()`. If `status === 'PROCESSING'` and no event has
+   arrived yet for the current step, show a real loading indicator (`Loader2` spinner +
+   "Waiting for <Agent Name>..." — already present as a branch, just remove the
+   `messages.length === 0` fake-timer race with it) rather than injecting canned text.
+3. Once `status === 'ACTION_REQUIRED'` or `'COMPLETED'`, render the **real**
+   `candidate_schemes` and `eligibility_result` payloads that arrived via
+   `latestData`/`events[].details` from the actual run (already returned by
+   `useAgentRun()` as `latestData` but currently unused by this page) instead of
+   `MOCK_SCHEMES`. The scheme-detail dialog's eligibility criteria table (currently five
+   hardcoded `<tr>` rows for Age/Student status/Household income/Residence/Enrollment)
+   must be generated by mapping over the real `eligibility_result.criteria` array that the
+   backend already produces per scheme.
+4. If `status === 'ERROR'` (the 9s hook timeout fired, or a 401 came back), show a real,
+   distinct error state with a "Retry" button that calls `startRun(input)` again — never
+   silently continue into the fake timeline.
+5. Keep the `examplePrompts` UX (those are legitimate placeholder *suggestions* for the
+   user to click, not simulated agent output — translate them via i18n per Task 1, don't
+   delete them).
+
+**Acceptance criteria:** grep the file for `setTimeout` and `MOCK_SCHEMES` — zero matches.
+Disconnecting from Supabase Realtime (e.g. via devtools offline mode) must produce a
+visible error state within ~9s, not a fake completed journey.
+
+---
+
+## 8. Task 7 — Seed/data/schema consistency
+
+Establish **one canonical scheme catalog** and make every fallback agree with it byte-for-byte on IDs and field names.
+
+1. Treat `supabase/seed.sql` as the single source of truth for scheme IDs, names,
+   categories, benefits (the 5 schemes: NMMSS `a000...0001`, PM-KISAN `...0002`, PMAY-U
+   `...0003`, APY `...0004`, Sukanya Samriddhi `...0005`).
+2. Rewrite `FALLBACK_SCHEMES_DB` in `src/lib/services.ts` to use exactly those 5 UUIDs,
+   exact `name`/`category`/`benefit` strings from `seed.sql`, and `reqDocs` arrays that
+   match `document_requirements` in `seed.sql` exactly (currently they already mostly
+   match — audit line-by-line and fix any drift, e.g. "Bank Account Details" vs "Bank
+   Passbook" wording differences).
+3. Rewrite `MOCK_SCHEMES_DATA` in `src/lib/admin-services.ts` to reuse the same 5 UUIDs
+   and drop the invented 5th scheme ("Rural Employment Guarantee") that has no
+   corresponding `seed.sql`/`eligibility_rules`/`document_requirements` rows — either add
+   real seed rows for it (if you want a 6th scheme) or delete it from the fallback. Do not
+   leave an orphaned fallback-only scheme with no backing eligibility rules.
+4. Retire `mock-data.ts`'s `schemes` array (`nmmse`/`hostel`/`pds` slugs) as part of Task 9
+   — it is a third, incompatible ID scheme and must not survive independently. Any UI
+   still using it (documents.tsx's "needed for NMMSS" hints, etc.) must be repointed at
+   real `document_requirements`/`applications` joins keyed by the canonical UUIDs.
+5. Add a small script `scripts/verify-seed-consistency.ts` (or a Vitest test, see Task 10)
+   that loads `FALLBACK_SCHEMES_DB` and asserts every `id` exists in a snapshot of the
+   `seed.sql` scheme IDs (hardcode the 5 UUIDs as an exported constant
+   `CANONICAL_SCHEME_IDS` in a new `src/lib/scheme-constants.ts` that both `services.ts`
+   and `admin-services.ts` import from, so there is exactly one place these IDs are
+   defined in the frontend).
+
+**Acceptance criteria:** `CANONICAL_SCHEME_IDS` (5 UUIDs) is the only place scheme UUIDs
+are literal-typed in the frontend; `services.ts`, `admin-services.ts` import it; the
+consistency test passes; zero remaining references to `"nmmse"`, `"hostel"`, `"pds"`,
+`"sch-1"/"sch-2"/"sch-3"`, `"s1"`, or `"demo-1"` style ad-hoc IDs anywhere in `src/`.
+
+---
+
+## 9. Task 8 — Agent-event write security (RLS fix)
+
+This is a real, exploitable finding, not stylistic: the current policy
+
+```sql
+create policy "agent_events_insert_all" on public.agent_events
+  for insert with check (
+    exists (
+      select 1 from public.agent_runs r
+      where r.id = run_id and (r.citizen_id = auth.uid() or public.is_admin())
+    )
+  );
+```
+
+lets a citizen's own browser session (their Supabase anon-key JWT) insert directly into
+`agent_events` for any `run_id` they own, forging fake AI-agent messages that would then
+appear as legitimate live events in their own timeline and — worse — feed into the audit
+narrative an admin later reviews.
+
+1. **New additive migration** `supabase/migrations/<timestamp>_lock_agent_events_writes.sql`:
+   ```sql
+   drop policy if exists "agent_events_insert_all" on public.agent_events;
+
+   -- Only the backend service role may write agent_events. Citizens/admins may only read
+   -- (existing "agent_events_via_run" select policy stays unchanged).
+   create policy "agent_events_insert_service_role_only" on public.agent_events
+     for insert with check (auth.jwt()->>'role' = 'service_role');
+   ```
+2. Audit every frontend call site that currently inserts into `agent_events` directly
+   from the browser client (`src/lib/services.ts`'s `understandCitizenNeed()` does exactly
+   this today via `supabase.from("agent_events").insert(...)` using the citizen's own
+   session) and **remove those direct inserts**. Citizen-initiated intent events must
+   instead be recorded by the backend (`orchestrate-agent-run` Edge Function already
+   creates the `agent_runs` row and forwards to the real backend graph, which already
+   calls `write_agent_event` with the service role key — the frontend's local intent
+   classification in `services.ts` becomes purely a client-side UX hint, no longer a
+   database write). Keep `understandCitizenNeed()`'s local category-detection heuristic for
+   optimistic UI only; delete its Supabase insert block.
+3. Apply the same audit to `audit_logs` (already correctly locked to admin/service_role —
+   verify no frontend code path attempts to insert there; if any does, remove it) and to
+   `agent_runs` (citizens are allowed to `insert`/read their own runs per existing policy —
+   that's fine, since `status` transitions are still driven by the backend/service role
+   on `update`; double check no frontend code ever calls `.update()` on `agent_runs`
+   directly — grep confirms it currently does not, keep it that way).
+
+**Acceptance criteria:** attempting `supabase.from('agent_events').insert(...)` from a
+citizen-authenticated browser session (write a test for this, Task 10) fails with a
+Postgres RLS error; the real orchestration flow (backend writing via service role)
+continues to work exactly as before.
+
+---
+
+## 10. Task 9 — Trustworthy failure handling
+
+1. Introduce a small `src/lib/result.ts` helper type,
+   `type ServiceResult<T> = { ok: true; data: T } | { ok: false; error: string;
+   degraded?: boolean }`, and migrate the highest-risk functions in `services.ts` /
+   `admin-services.ts` to return it instead of silently swallowing errors into a fake
+   success value. Priority order (do these first, then extend the pattern outward as time
+   allows):
+   - `validateDocument()` — must **never** return a fabricated `extractedFields` with
+     "Rahul Sharma" if the real Supabase insert/upload failed; on failure it must return
+     `{ ok: false, error: '...' }` and the calling UI (`documents.tsx`) must show a
+     retryable error toast, not a fake "verified" document card.
+   - `submitApplication()` / `recordConsent()` — a failed write must surface a blocking
+     error to the citizen before they believe their application was submitted (currently
+     these always `return { success: true, ... }` even when the Supabase `.update()`
+     call inside the `try` failed silently).
+   - `getAdminMetrics()` / the new analytics functions from Task 3 — must distinguish
+     "Supabase not configured (dev/demo mode)" from "Supabase configured but the query
+     errored" — the latter is a real production bug and should render a visible "couldn't
+     load live metrics, showing cached snapshot from <timestamp>" banner, never present
+     stale/fake numbers as if they were current, live data.
+2. Add a top-level React error boundary (TanStack Router has `errorComponent` support —
+   check `src/lib/error-page.ts` and `src/lib/error-capture.ts`, which already exist but
+   audit whether they're actually wired into `router.tsx`'s route tree; if not, wire them)
+   so an unhandled exception in any route renders a friendly, localized error page instead
+   of a blank screen or raw stack trace, while still forwarding the error to
+   `lovable-error-reporting.ts`'s existing reporting hook.
+3. For the Realtime hook (`use-agent-run.ts`), add reconnect/backoff handling: if the
+   Supabase Realtime WebSocket disconnects mid-run, show a "reconnecting..." indicator
+   instead of leaving the UI stuck on the last received event with no explanation.
+4. Replace bare `console.warn("[Sahayak ...] ...")` calls in production code paths that
+   represent *user-impacting* failures (not all `console.warn`s need to change — dev-only
+   diagnostic ones are fine) with a call to the existing `error-capture.ts`/
+   `lovable-error-reporting.ts` reporting hook **and** a user-visible signal (toast/banner)
+   as appropriate to that call site.
+
+**Acceptance criteria:** simulate a Supabase outage (wrong URL in `.env` temporarily, or
+mock the client to always error) and confirm: document upload shows a clear retryable
+error (not a fake verified doc), submitting an application shows a clear error (not a fake
+success toast), analytics shows a clear "couldn't load" banner (not zeros or fake numbers),
+and no route renders a blank white screen.
+
+---
+
+## 11. Task 10 — Legacy mock services cleanup
+
+1. Delete `src/lib/mock-data.ts` **after** every remaining consumer has been repointed to
+   real data by the earlier tasks (Tasks 2–8 collectively remove every production import
+   of it). Do a final `grep -rn "from \"@/lib/mock-data\"" src/` and confirm zero results
+   before deleting the file.
+2. In `src/lib/admin-services.ts`, keep `MOCK_ADMIN_METRICS` / `MOCK_AGENT_EVENTS` /
+   `MOCK_SCHEMES_DATA` **only** as the explicit, clearly-named fallback branch inside each
+   `if (!isSupabaseConfigured)` guard (this is legitimate "local demo mode without a
+   Supabase project" behavior, described in the README) — but rename them with an
+   unambiguous prefix, e.g. `LOCAL_DEMO_ADMIN_METRICS`, and add a one-line comment above
+   each: `// Used ONLY when Supabase is not configured (local/offline demo). Never used
+   as an error fallback — see Task 9.` Ensure none of these constants are reachable from a
+   code path where Supabase *is* configured but a query merely failed (that must now go
+   through the `ServiceResult` error path from Task 9, not silently return the mock).
+3. Same rename/guard treatment for `DEMO_PROFILE` in `auth.ts` (rename to
+   `LOCAL_DEMO_PROFILE` with the same comment) and for `FALLBACK_SCHEMES_DB` in
+   `services.ts` (rename to `LOCAL_DEMO_SCHEMES_DB` — this one is trickier since it's also
+   used as a genuine partial fallback when Supabase *is* configured but returns zero rows
+   for a category; keep that specific behavior since it's reasonable, just make sure it
+   is never used to mask a real query error, only a real "zero rows" result, per Task 9's
+   `ServiceResult` distinction).
+4. Search the whole `src/` tree for any remaining literal `"Rahul Sharma"`,
+   `"rahul@sahayak.gov.in"`, `"XXXX-XXXX-4321"`, or similar hardcoded demo-citizen values
+   **outside** of the now-clearly-labeled `LOCAL_DEMO_*` constants and the demo credentials
+   documented in `login.tsx`'s placeholder text — replace every other occurrence with real
+   data plumbing per the earlier tasks.
+
+**Acceptance criteria:** `grep -rn "mock-data" src/` returns nothing; every remaining
+`LOCAL_DEMO_*`/demo constant is behind an explicit `isSupabaseConfigured` guard and
+carries the standard comment; no literal "Rahul Sharma"-style data leaks into a real,
+Supabase-connected session.
+
+---
+
+## 12. Task 11 — Complete the "ask for citizen documents and start working" flow
+
+This is the feature-completeness ask underlying several 🔴 items: today `documents.tsx`
+lets someone upload *a* file, but there is no guided flow that says "for the scheme you
+matched with, here are the N documents we need from you, upload each one, and we'll tell
+you when you're eligible."
+
+1. Extend `src/routes/documents.tsx` to accept optional query params
+   `?scheme=<scheme_id>` (and, from Task 5's dialog fix, `&required=<document_type>`).
+   When a `scheme` param is present, query `document_requirements` for that scheme and
+   render a **checklist** (one row per required document) instead of (or in addition to,
+   your call — recommend "in addition to", so a generic "my documents" library view still
+   exists) a generic upload dropzone. Each checklist row shows: document name, mandatory
+   badge, current status (missing/pending/verified/needs_review, from the citizen's
+   `documents` table matched by `document_type`), and an upload control scoped to that
+   specific requirement.
+2. On successful upload + extraction (the existing `validateDocument()` → Supabase
+   Storage → `extract-document` Edge Function → Groq Vision pipeline already does the
+   heavy lifting — do not rebuild it, just surface its real status), the checklist row
+   must live-update via a Supabase Realtime subscription on `documents` filtered to
+   `citizen_id = me` (mirror the subscription pattern already used in `use-agent-run.ts`)
+   so the citizen sees "Extraction in progress... → Verified" without refreshing.
+3. Once every mandatory document for the scheme is `verified`, show an inline "You're
+   ready — continue to your application" CTA linking to `/applications/<id>` (creating the
+   draft via `prepareApplication(schemeId)` if one doesn't exist yet), directly connecting
+   this flow into Task 5's approval/submission flow.
+4. This is the natural onboarding entry point too: update `/assistant`'s post-results
+   scheme cards so clicking a scheme (not just the dialog's info view) offers a clear
+   "Start my application — I'll need to provide N documents" primary action that routes
+   into this checklist flow.
+
+**Acceptance criteria:** starting from `/assistant`, a citizen can pick a matched scheme,
+land on a real per-scheme document checklist, upload every required document, watch each
+one flip from pending to verified in real time, and land on a real, submittable
+application — with no step of that journey backed by mock or simulated data.
+
+---
+
+## 13. Task 12 — Automated / E2E testing
+
+1. Add dev dependencies: `vitest`, `@vitest/ui`, `@testing-library/react`,
+   `@testing-library/jest-dom`, `@testing-library/user-event`, `jsdom`, and
+   `@playwright/test`. Add `package.json` scripts:
+   `"test": "vitest run"`, `"test:watch": "vitest"`, `"test:e2e": "playwright test"`.
+2. **Unit/integration tests (Vitest + RTL)** — minimum required coverage:
+   - `src/lib/auth.ts`: `requireAuth()` redirects when no session;
+     `requireAdmin()` redirects non-admins to `/dashboard`; `signIn`/`signUp` local-fallback
+     branch behavior when Supabase isn't configured.
+   - `src/lib/services.ts`: scheme-ID consistency test from Task 7
+     (`CANONICAL_SCHEME_IDS`); `checkEligibility()` fallback branch logic;
+     `getApplicationStatus()` timeline derivation for each possible `status` value.
+   - `src/hooks/use-agent-run.ts`: mock the Supabase client, assert `startRun()` sets
+     `status: 'PROCESSING'`, that an incoming `agent_events` INSERT updates `events`/
+     `activeAgentIndex` correctly for all six agent names (including the new Tracker
+     Agent from Task 5), and that the 9s timeout sets `status: 'ERROR'` when no server
+     response/events arrive (use `vi.useFakeTimers()`).
+   - `src/routes/assistant.tsx`: render test asserting **no** `setTimeout`-driven text
+     ever appears — i.e., mock `useAgentRun` to return zero events and assert the UI shows
+     a loading/waiting state, not any of the old canned strings, proving Task 6 stays
+     fixed against regression.
+   - i18n smoke test: render `dashboard.tsx` (or a representative component) with each of
+     the 6 locales active and assert no raw translation keys (e.g. `dashboard.greeting`)
+     leak into the rendered output, proving every key resolves in every locale.
+3. **Database/RLS tests** — add `supabase/tests/` with `pgTAP` tests (Supabase CLI
+   supports `supabase test db`) covering at minimum:
+   - a citizen JWT cannot `insert` into `agent_events` (Task 8 regression guard),
+   - a citizen JWT cannot `select` another citizen's `applications`/`documents`,
+   - `public.is_admin()` correctly gates admin-only tables,
+   - the new analytics RPC functions from Task 3 reject non-admin callers.
+   If the Supabase CLI/pgTAP is not available in this environment, implement the
+   equivalent as Vitest integration tests against a local Supabase instance
+   (`supabase start`) using two authenticated test users (one citizen, one admin) — pick
+   whichever is feasible in this repo's CI and document the choice in `README.md`.
+4. **E2E (Playwright)** — one critical-path spec,
+   `e2e/citizen-journey.spec.ts`, driving a real (test/staging) Supabase project or a
+   local `supabase start` instance through: sign up → land on real empty-state dashboard
+   → start assistant conversation → real agent run completes (or is asserted to reach
+   `ACTION_REQUIRED`/`COMPLETED` within a generous timeout against the real backend) →
+   upload required documents via the Task 11 checklist → approve & submit application
+   (Task 4) → see it reflected on the dashboard. A second spec,
+   `e2e/admin-review.spec.ts`, covering admin login → analytics page shows non-mock,
+   non-zero numbers after the citizen journey ran → review queue shows the submitted
+   application → approve it → citizen's dashboard reflects `approved` status.
+5. Wire `test`, `test:e2e` into whatever CI config exists (add a minimal GitHub Actions
+   workflow `.github/workflows/ci.yml` running lint, unit tests, and build on every PR, if
+   none exists yet — check first).
+
+**Acceptance criteria:** `npm run test` and `npm run test:e2e` both exist and pass
+locally against a fresh `supabase start` + seeded DB; CI runs them on every PR.
+
+---
+
+## 14. Definition of Done (final checklist — verify all before calling this complete)
+
+- [ ] All six languages (en, hi, bn, mr, te, ta) fully translate every citizen-facing
+      screen; language picker works pre- and post-login; choice persists.
+- [ ] Dashboard shows the real logged-in citizen's name and real, per-citizen metrics;
+      two different accounts show two different dashboards; new signups see an honest
+      empty state.
+- [ ] `/analytics` is backed entirely by real Supabase queries/RPCs, admin-gated at the
+      database layer, and visibly changes when real data changes.
+- [ ] A citizen can review, consent to, and submit a real application; an admin can see it
+      in a real queue and approve/reject it with a persisted, audited reason.
+- [ ] A real 6th Tracker Agent exists in the backend graph, writes real events/
+      notifications, and is reflected in the frontend's agent step UI and roster.
+- [ ] `assistant.tsx` contains zero `setTimeout` simulation logic and zero `MOCK_SCHEMES`;
+      it renders only real run data and a real error/retry state on failure.
+- [ ] Exactly one canonical set of 5 scheme UUIDs exists (`CANONICAL_SCHEME_IDS`), used
+      consistently by `seed.sql`, `services.ts`, and `admin-services.ts`.
+- [ ] `agent_events` can only be inserted by the service role; the old citizen-writable
+      policy is dropped; a regression test proves it.
+- [ ] Every high-risk write/read path returns an honest success/failure/degraded result
+      instead of silently fabricating data on error; error boundary + reconnect handling
+      exist.
+- [ ] `mock-data.ts` is deleted; remaining `LOCAL_DEMO_*` fallbacks are clearly named,
+      commented, and only reachable when Supabase is genuinely unconfigured.
+- [ ] A citizen can go from "talk to the assistant" → "upload every required document for
+      a specific matched scheme, with live status" → "submit a real application" without
+      hitting a single mock/simulated step.
+- [ ] Unit tests, RLS/db tests, and at least two Playwright E2E specs exist and pass; CI
+      runs them.
+- [ ] The existing backend orchestration (`backend/agent_graph.py`'s five original nodes),
+      RLS model, and all previously-working routes/behaviors are unchanged and still pass
+      a manual smoke test end-to-end.

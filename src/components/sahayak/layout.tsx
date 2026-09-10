@@ -17,22 +17,13 @@ import {
   X,
   LogOut,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ConsentModal } from "./components";
+import { ConsentModal, LanguageSwitcher } from "./components";
 import { cn } from "@/lib/utils";
-import { signOut } from "@/lib/auth";
-
-const primaryNav = [
-  ["Dashboard", "/dashboard", LayoutDashboard],
-  ["AI Assistant", "/assistant", MessageSquareText],
-  ["My Schemes", "/schemes", Compass],
-  ["Documents", "/documents", FileText],
-  ["Applications", "/applications", FileCheck2],
-  ["Notifications", "/notifications", Bell],
-  ["Profile", "/profile", UserRound],
-] as const;
+import { signOut, getCurrentProfile, type UserProfile } from "@/lib/auth";
 
 function Logo() {
   return (
@@ -53,7 +44,19 @@ function Logo() {
 }
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }) {
+  const { t } = useTranslation();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+
+  const primaryNav = [
+    [t("nav.dashboard", "Dashboard"), "/dashboard", LayoutDashboard],
+    [t("nav.assistant", "AI Assistant"), "/assistant", MessageSquareText],
+    [t("nav.schemes", "Schemes"), "/schemes", Compass],
+    [t("nav.documents", "Documents"), "/documents", FileText],
+    [t("nav.applications", "Applications"), "/applications", FileCheck2],
+    [t("nav.notifications", "Notifications"), "/notifications", Bell],
+    [t("nav.profile", "Profile"), "/profile", UserRound],
+  ] as const;
+
   return (
     <nav className="space-y-1">
       {primaryNav.map(([label, path, Icon]) => {
@@ -72,28 +75,6 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
           >
             <Icon className="size-4" />
             {label}
-            {label === "My Schemes" && (
-              <span
-                className={cn(
-                  "ml-auto rounded-full px-1.5 py-0.5 text-[10px]",
-                  active ? "bg-primary-foreground/15 text-primary-foreground" : "bg-ice text-brand",
-                )}
-              >
-                3
-              </span>
-            )}
-            {label === "Applications" && (
-              <span
-                className={cn(
-                  "ml-auto rounded-full px-1.5 py-0.5 text-[10px]",
-                  active
-                    ? "bg-primary-foreground/15 text-primary-foreground"
-                    : "bg-amber/10 text-amber",
-                )}
-              >
-                2
-              </span>
-            )}
           </Link>
         );
       })}
@@ -104,12 +85,30 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }) {
 export function AppShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [consentOpen, setConsentOpen] = useState(false);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const navigate = useNavigate();
+  const { t } = useTranslation();
+
+  useEffect(() => {
+    getCurrentProfile().then((p) => {
+      if (p) setProfile(p);
+    });
+  }, []);
 
   const handleLogout = async () => {
     await signOut();
     navigate({ to: "/login" });
   };
+
+  const userInitials = profile?.full_name
+    ? profile.full_name
+        .split(" ")
+        .filter(Boolean)
+        .map((n) => n[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase()
+    : "CT";
 
   return (
     <div className="min-h-screen bg-ice-2 text-foreground">
@@ -130,7 +129,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Search className="size-4" />
               <Input
                 aria-label="Search schemes, documents and actions"
-                placeholder="Search schemes, documents, actions…"
+                placeholder={t("schemes.searchPlaceholder", "Search schemes, documents, actions…")}
                 className="h-7 border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
               />
             </label>
@@ -142,17 +141,13 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <span className="absolute ml-4 mt-[-13px] size-1.5 rounded-full bg-coral" />
               </Link>
             </Button>
-            <Button variant="outline" size="sm" className="hidden gap-1.5 bg-card sm:flex">
-              <Globe2 className="size-3.5" />
-              EN
-              <ChevronDown className="size-3" />
-            </Button>
+            <LanguageSwitcher />
             <Link
               to="/profile"
-              aria-label="Open Rahul Sharma profile"
+              aria-label={`Open ${profile?.full_name || "citizen"} profile`}
               className="grid size-9 place-items-center rounded-lg bg-brand-soft/15 text-xs font-semibold text-brand"
             >
-              RS
+              {userInitials}
             </Link>
           </div>
         </div>
@@ -198,17 +193,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <LogOut className="size-4" />
                 Logout
               </Button>
-              <div className="mt-2 flex items-center gap-3 px-3 text-xs text-muted-foreground">
-                <Globe2 className="size-4" />
-                English <span className="text-line">·</span> हिंदी
-              </div>
               <div className="mt-3 flex items-center gap-3 border-t border-line px-3 pt-3">
                 <div className="grid size-8 place-items-center rounded-full bg-brand-soft/15 text-xs font-semibold text-brand">
-                  RS
+                  {userInitials}
                 </div>
-                <div>
-                  <p className="text-xs font-semibold">Rahul Sharma</p>
-                  <p className="text-[10px] text-muted-foreground">Citizen account</p>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-semibold">
+                    {profile?.full_name || t("dashboard.citizenDefault", "Citizen")}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground capitalize">
+                    {profile?.role || "Citizen"}
+                  </p>
                 </div>
               </div>
             </div>

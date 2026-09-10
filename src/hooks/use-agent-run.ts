@@ -11,6 +11,15 @@ export type LiveAgentEvent = {
   created_at: string;
 };
 
+export const AGENT_STEPS = [
+  { key: "citizen", label: "Citizen Context", agentName: "Citizen Agent" },
+  { key: "scheme", label: "Scheme Discovery", agentName: "Scheme Agent" },
+  { key: "eligibility", label: "Rule Verification", agentName: "Eligibility Agent" },
+  { key: "document", label: "Document Check", agentName: "Document Agent" },
+  { key: "application", label: "Draft Preparation", agentName: "Application Agent" },
+  { key: "tracker", label: "Journey Tracking", agentName: "Tracker Agent" },
+];
+
 export function useAgentRun() {
   const [runId, setRunId] = useState<string | null>(null);
   const [events, setEvents] = useState<LiveAgentEvent[]>([]);
@@ -19,6 +28,7 @@ export function useAgentRun() {
   );
   const [activeAgentIndex, setActiveAgentIndex] = useState<number>(-1);
   const [latestData, setLatestData] = useState<Record<string, any>>({});
+  const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
   const eventsChannelRef = useRef<any>(null);
   const runsChannelRef = useRef<any>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -60,6 +70,7 @@ export function useAgentRun() {
 
           // Receiving any event means the run is alive — cancel the timeout
           clearRunTimeout();
+          setIsReconnecting(false);
 
           // Update active agent index based on agent name (display only, not status ground truth)
           const agentName = newEvent.agent_name.toLowerCase();
@@ -73,6 +84,8 @@ export function useAgentRun() {
             setActiveAgentIndex(3);
           } else if (agentName.includes("application")) {
             setActiveAgentIndex(4);
+          } else if (agentName.includes("tracker")) {
+            setActiveAgentIndex(5);
           }
 
           if (newEvent.details) {
@@ -80,7 +93,13 @@ export function useAgentRun() {
           }
         },
       )
-      .subscribe();
+      .subscribe((subStatus) => {
+        if (subStatus === "CHANNEL_ERROR" || subStatus === "TIMED_OUT") {
+          setIsReconnecting(true);
+        } else if (subStatus === "SUBSCRIBED") {
+          setIsReconnecting(false);
+        }
+      });
 
     eventsChannelRef.current = eventsChannel;
 
@@ -101,6 +120,7 @@ export function useAgentRun() {
 
           // Cancel timeout — the run completed (one way or another)
           clearRunTimeout();
+          setIsReconnecting(false);
 
           if (updatedStatus === "COMPLETED") {
             setStatus("COMPLETED");
@@ -190,6 +210,7 @@ export function useAgentRun() {
     status,
     activeAgentIndex,
     latestData,
+    isReconnecting,
     startRun,
   };
 }

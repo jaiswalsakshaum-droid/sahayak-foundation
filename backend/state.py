@@ -48,6 +48,16 @@ class ApplicationDraftPayload(BaseModel):
     required_attachments: List[str] = Field(description="List of document attachments linked to draft")
     message: str = Field(description="Summary message from application agent")
 
+class TrackerUpdate(BaseModel):
+    application_id: Optional[str] = Field(default=None, description="Application UUID")
+    tracking_id: str = Field(description="Application tracking reference code")
+    scheme_name: str = Field(description="Official scheme title")
+    days_under_review: int = Field(default=0, description="Days elapsed since submission")
+    status: str = Field(description="Current application status")
+    next_action: Optional[Dict[str, Any]] = Field(default=None, description="Next recommended action")
+    escalated: bool = Field(default=False, description="Whether an SLA escalation notification was dispatched")
+
+
 # ==============================================================================
 # LangGraph State Schema
 # ==============================================================================

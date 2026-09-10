@@ -1,5 +1,6 @@
-import { createFileRoute, Link, redirect } from "@tanstack/react-router";
-import { useState, useEffect, useRef } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ArrowRight,
   Bot,
@@ -15,10 +16,15 @@ import {
   Send,
   FileWarning,
   Sparkles,
+  AlertCircle,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { requireAuth } from "@/lib/auth";
+import { useAgentRun } from "@/hooks/use-agent-run";
+import { findRelevantSchemes, understandCitizenNeed, checkEligibility, type SchemeMatch } from "@/lib/services";
+import { LanguageSwitcher } from "@/components/sahayak";
 
 export const Route = createFileRoute("/assistant")({
   beforeLoad: async () => {
@@ -27,65 +33,26 @@ export const Route = createFileRoute("/assistant")({
   component: AssistantPage,
 });
 
-const examplePrompts = [
-  "I need financial help for my daughter's education.",
-  "I am a farmer and need government support.",
-  "I recently lost my job. What support is available?",
-  "Mujhe scholarship ke liye apply karna hai.",
-];
-
-const MOCK_SCHEMES = [
-  {
-    id: "sch-1",
-    name: "National Scholarship",
-    match: 94,
-    benefit: "₹25,000/year",
-    reqDocs: ["Income Certificate", "Enrollment Certificate", "Identity Proof"],
-    summary: "Matches based on low household income and student enrollment status.",
-    official: true,
-    lastVerified: "Today",
-  },
-  {
-    id: "sch-2",
-    name: "State Education Support (Sample)",
-    match: 88,
-    benefit: "₹15,000/year",
-    reqDocs: ["Domicile Certificate", "Previous Year Marksheet"],
-    summary: "Matches state residency requirement.",
-    official: true,
-    lastVerified: "2 days ago",
-  },
-  {
-    id: "sch-3",
-    name: "Girls Higher Education Grant",
-    match: 82,
-    benefit: "₹10,000 one-time",
-    reqDocs: ["Birth Certificate", "Institution Recommendation"],
-    summary: "Specific to female students pursuing higher education.",
-    official: true,
-    lastVerified: "1 week ago",
-  },
-];
-
-import { useAgentRun } from "@/hooks/use-agent-run";
-
 type JourneyStep = {
   id: string;
   agentId: string;
   name: string;
   icon: any;
   messages: string[];
-  handoffMessage?: string;
 };
 
-function AssistantPage() {
+export function AssistantPage() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
   const [input, setInput] = useState("");
   const [hasStarted, setHasStarted] = useState(false);
   const [activeStepIndex, setActiveStepIndex] = useState(-1);
   const [showResults, setShowResults] = useState(false);
-  const [selectedScheme, setSelectedScheme] = useState<(typeof MOCK_SCHEMES)[0] | null>(null);
+  const [candidateSchemes, setCandidateSchemes] = useState<SchemeMatch[]>([]);
+  const [selectedScheme, setSelectedScheme] = useState<SchemeMatch | null>(null);
+  const [schemeCriteria, setSchemeCriteria] = useState<any[]>([]);
 
-  const { runId, events, status, activeAgentIndex, startRun } = useAgentRun();
+  const { runId, events, status, activeAgentIndex, latestData, isReconnecting, startRun } = useAgentRun();
 
   const [journeySteps, setJourneySteps] = useState<JourneyStep[]>([
     {
@@ -94,7 +61,6 @@ function AssistantPage() {
       name: "Citizen Agent",
       icon: ShieldCheck,
       messages: [],
-      handoffMessage: "Passing citizen context...",
     },
     {
       id: "s2",
@@ -102,7 +68,6 @@ function AssistantPage() {
       name: "Scheme Agent",
       icon: SearchCheck,
       messages: [],
-      handoffMessage: "Passing matched schemes...",
     },
     {
       id: "s3",
@@ -110,7 +75,6 @@ function AssistantPage() {
       name: "Eligibility Agent",
       icon: ClipboardCheck,
       messages: [],
-      handoffMessage: "Passing criteria requirements...",
     },
     {
       id: "s4",
@@ -118,7 +82,6 @@ function AssistantPage() {
       name: "Document Agent",
       icon: FileCheck2,
       messages: [],
-      handoffMessage: "Passing missing document flags...",
     },
     {
       id: "s5",
@@ -127,9 +90,23 @@ function AssistantPage() {
       icon: FileText,
       messages: [],
     },
+    {
+      id: "s6",
+      agentId: "tracker",
+      name: "Tracker Agent",
+      icon: Landmark,
+      messages: [],
+    },
   ]);
 
-  // Sync Realtime events into journey step messages
+  const examplePrompts = [
+    "I need financial help for my daughter's education.",
+    "I am a farmer and need government support.",
+    "I recently lost my job. What support is available?",
+    "Mujhe scholarship ke liye apply karna hai.",
+  ];
+
+  // Sync incoming Realtime events into journey step messages
   useEffect(() => {
     if (events.length === 0) return;
 
@@ -141,6 +118,7 @@ function AssistantPage() {
       else if (agentLower.includes("eligibility")) stepIdx = 2;
       else if (agentLower.includes("document")) stepIdx = 3;
       else if (agentLower.includes("application")) stepIdx = 4;
+      else if (agentLower.includes("tracker")) stepIdx = 5;
 
       if (stepIdx !== -1) {
         setJourneySteps((prev) => {
@@ -160,10 +138,38 @@ function AssistantPage() {
       setActiveStepIndex(activeAgentIndex);
     }
 
+    // Process candidate schemes payload if returned in event details
+    if (latestData?.candidate_schemes && Array.isArray(latestData.candidate_schemes)) {
+      setCandidateSchemes(
+        latestData.candidate_schemes.map((s: any) => ({
+          id: s.id,
+          name: s.name,
+          category: s.category || "General",
+          benefit: s.benefit || "Government Support",
+          matchScore: s.match_score || 90,
+          description: s.reasoning || s.description || "",
+          official: true,
+          reqDocs: ["Aadhaar Card", "Income Certificate"],
+          lastVerified: "Today",
+        }))
+      );
+    }
+
     if (status === "ACTION_REQUIRED" || status === "COMPLETED") {
       setShowResults(true);
     }
-  }, [events, activeAgentIndex, status]);
+  }, [events, activeAgentIndex, status, latestData]);
+
+  // Load criteria when a scheme is selected in dialog
+  useEffect(() => {
+    if (selectedScheme) {
+      checkEligibility(selectedScheme.id).then((res) => {
+        setSchemeCriteria(res.criteria);
+      });
+    } else {
+      setSchemeCriteria([]);
+    }
+  }, [selectedScheme]);
 
   const handleSend = async (text: string) => {
     if (!text.trim()) return;
@@ -173,59 +179,19 @@ function AssistantPage() {
     setShowResults(false);
     setJourneySteps((prev) => prev.map((s) => ({ ...s, messages: [] })));
 
-    // Trigger backend LangGraph orchestration via Edge Function / Realtime
+    // 1. Fetch matching schemes catalog via live service
+    const intent = await understandCitizenNeed(text);
+    const matched = await findRelevantSchemes(intent);
+    setCandidateSchemes(matched);
+
+    // 2. Trigger real backend LangGraph orchestration run
     await startRun(text);
+  };
 
-    // Fallback simulation timer to guarantee smooth UI reveal if offline
-    setTimeout(() => {
-      setJourneySteps((prev) => {
-        const copy = [...prev];
-        if (copy[0].messages.length === 0) {
-          copy[0].messages = [
-            "Understanding citizen situation...",
-            "Detected education + low-income household.",
-          ];
-        }
-        return copy;
-      });
-      setActiveStepIndex(1);
-    }, 2000);
-
-    setTimeout(() => {
-      setJourneySteps((prev) => {
-        const copy = [...prev];
-        if (copy[1].messages.length === 0) {
-          copy[1].messages = [
-            "Scanning schemes catalog...",
-            "4 potentially relevant schemes found.",
-          ];
-        }
-        return copy;
-      });
-      setActiveStepIndex(2);
-    }, 4500);
-
-    setTimeout(() => {
-      setJourneySteps((prev) => {
-        const copy = [...prev];
-        if (copy[2].messages.length === 0) {
-          copy[2].messages = ["Evaluating household income and enrollment criteria..."];
-        }
-        return copy;
-      });
-      setActiveStepIndex(3);
-    }, 7000);
-
-    setTimeout(() => {
-      setJourneySteps((prev) => {
-        const copy = [...prev];
-        if (copy[3].messages.length === 0) {
-          copy[3].messages = ["1 required document missing (Enrollment Certificate)."];
-        }
-        return copy;
-      });
-      setShowResults(true);
-    }, 9500);
+  const handleRetry = () => {
+    if (input) {
+      handleSend(input);
+    }
   };
 
   return (
@@ -233,7 +199,7 @@ function AssistantPage() {
       <header className="sticky top-0 z-30 border-b border-line bg-ice-2/90 backdrop-blur-sm">
         <div className="mx-auto flex h-16 max-w-5xl items-center px-5">
           <div className="flex items-center gap-4 w-full">
-            <Link to="/" className="text-muted-foreground hover:text-foreground">
+            <Link to="/dashboard" className="text-muted-foreground hover:text-foreground">
               <span className="grid size-8 place-items-center rounded-lg bg-card border border-line">
                 <ArrowRight className="size-4 rotate-180" />
               </span>
@@ -242,19 +208,17 @@ function AssistantPage() {
               <span className="grid size-8 place-items-center rounded-lg bg-brand text-sm font-semibold text-primary-foreground">
                 <Bot className="size-4" />
               </span>
-              <span className="font-display font-semibold hidden sm:block">Sahayak Workforce</span>
+              <span className="font-display font-semibold hidden sm:block">
+                {t("assistant.badge", "Citizen AI Workforce")}
+              </span>
             </div>
-            <div className="ml-auto">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setInput(examplePrompts[0]);
-                  startWorkforce();
-                }}
-              >
-                Start Orchestration
-              </Button>
+            <div className="ml-auto flex items-center gap-3">
+              {isReconnecting && (
+                <span className="text-xs text-amber flex items-center gap-1">
+                  <Loader2 className="size-3 animate-spin" /> Reconnecting...
+                </span>
+              )}
+              <LanguageSwitcher />
             </div>
           </div>
         </div>
@@ -263,15 +227,17 @@ function AssistantPage() {
       <main className="flex-1 mx-auto w-full max-w-5xl px-5 py-8 flex flex-col">
         {!hasStarted ? (
           <div className="flex-1 flex flex-col items-center justify-center max-w-2xl mx-auto w-full text-center py-20">
-            <h1 className="text-4xl font-display font-semibold mb-4">How can we help you today?</h1>
-            <p className="text-muted-foreground mb-8 text-lg">
-              Tell us your need, and our AI workforce will find and verify the best schemes for you.
+            <h1 className="text-4xl font-display font-semibold mb-4">
+              {t("assistant.title", "What benefit or support are you looking for today?")}
+            </h1>
+            <p className="text-muted-foreground mb-8 text-base">
+              {t("assistant.subtitle", "Speak or type in your language. 6 specialized AI agents will verify rules, check documents, and draft applications with your consent.")}
             </p>
 
             <div className="w-full relative mb-8">
               <textarea
                 className="w-full min-h-[120px] rounded-xl border border-line bg-card p-4 pr-12 text-base resize-none focus:outline-none focus:ring-2 focus:ring-brand shadow-sm"
-                placeholder="E.g. I need financial help for my daughter's education..."
+                placeholder={t("assistant.inputPlaceholder", "e.g., I am a college student from UP needing scholarship support...")}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
               />
@@ -279,60 +245,101 @@ function AssistantPage() {
                 size="icon"
                 className="absolute bottom-3 right-3 rounded-lg"
                 onClick={() => handleSend(input)}
+                disabled={!input.trim()}
               >
                 <Send className="size-4" />
               </Button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full text-left">
-              {examplePrompts.map((p, i) => (
-                <button
-                  key={i}
-                  className="p-3 text-sm rounded-lg border border-line bg-card hover:border-brand/50 hover:bg-brand/5 transition-colors text-left"
-                  onClick={() => handleSend(p)}
-                >
-                  {p}
-                </button>
-              ))}
+            <div className="w-full text-left mb-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                {t("assistant.suggestedPrompts", "Suggested queries:")}
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
+                {examplePrompts.map((p, i) => (
+                  <button
+                    key={i}
+                    className="p-3 text-sm rounded-lg border border-line bg-card hover:border-brand/50 hover:bg-brand/5 transition-colors text-left text-muted-foreground hover:text-foreground"
+                    onClick={() => handleSend(p)}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         ) : (
           <div className="flex-1 flex flex-col lg:flex-row gap-8">
+            {/* Workforce execution column */}
             <div className="flex-1 lg:max-w-[450px]">
               <div className="mb-6 rounded-xl border border-line bg-card p-5 shadow-sm">
-                <p className="text-sm text-muted-foreground mb-1">Your Request</p>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+                  Your Query
+                </p>
                 <p className="text-base font-medium">{input}</p>
               </div>
 
+              {/* Error State with Retry Button */}
+              {status === "ERROR" && (
+                <div className="mb-6 rounded-xl border border-coral/30 bg-coral/10 p-5 shadow-sm">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="size-5 text-coral shrink-0 mt-0.5" />
+                    <div>
+                      <h3 className="font-semibold text-coral text-sm">
+                        {t("assistant.errorTitle", "Assistant Encountered an Issue")}
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {t("assistant.errorDesc", "Unable to complete agent workflow. Please check your connection and try again.")}
+                      </p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleRetry}
+                        className="mt-3 gap-1.5 border-coral/40 text-coral hover:bg-coral/10"
+                      >
+                        <RefreshCw className="size-3.5" />
+                        {t("assistant.retry", "Retry Run")}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="space-y-6">
-                <h2 className="text-lg font-semibold flex items-center gap-2">
+                <h2 className="text-lg font-semibold flex items-center gap-2 font-display">
                   <Sparkles className="size-5 text-brand" />
-                  Workforce Execution
+                  Workforce Orchestration
                 </h2>
 
-                <div className="relative pl-6 border-l-2 border-line space-y-10 py-4 ml-4">
+                <div className="relative pl-6 border-l-2 border-line space-y-8 py-2 ml-4">
                   {journeySteps.map((step, index) => {
-                    // Only show steps that have been reached
-                    if (index > activeStepIndex && !showResults && activeStepIndex !== -1)
-                      return null;
-
-                    // Hide future steps when showing results if they haven't been processed
-                    if (showResults && step.messages.length === 0) return null;
-
-                    const isCurrent = index === activeStepIndex;
+                    const isCurrent = index === activeStepIndex && status === "PROCESSING";
                     const isPast = index < activeStepIndex || showResults;
+
+                    if (index > activeStepIndex && !showResults && activeStepIndex !== -1) {
+                      return null;
+                    }
+                    if (showResults && step.messages.length === 0) return null;
 
                     return (
                       <div key={step.id} className="relative">
                         <span
-                          className={`absolute -left-[41px] grid size-8 place-items-center rounded-full border-2 ${isCurrent ? "bg-brand border-brand text-primary-foreground animate-pulse shadow-[0_0_15px_rgba(37,99,235,0.5)]" : "bg-card border-line text-muted-foreground"}`}
+                          className={`absolute -left-[41px] grid size-8 place-items-center rounded-full border-2 ${
+                            isCurrent
+                              ? "bg-brand border-brand text-primary-foreground animate-pulse shadow-[0_0_12px_rgba(37,99,235,0.4)]"
+                              : isPast
+                                ? "bg-sage border-sage text-primary-foreground"
+                                : "bg-card border-line text-muted-foreground"
+                          }`}
                         >
                           <step.icon className="size-4" />
                         </span>
 
                         <div className="pl-2">
                           <h3
-                            className={`font-medium ${isCurrent ? "text-foreground" : "text-muted-foreground"}`}
+                            className={`font-medium text-sm ${
+                              isCurrent ? "text-brand font-semibold" : isPast ? "text-foreground" : "text-muted-foreground"
+                            }`}
                           >
                             {step.name}
                           </h3>
@@ -342,7 +349,7 @@ function AssistantPage() {
                               {step.messages.map((msg, i) => (
                                 <div
                                   key={i}
-                                  className="text-sm rounded-md bg-ice-2 p-2.5 border border-line text-muted-foreground shadow-sm"
+                                  className="text-xs rounded-md bg-card p-2.5 border border-line text-muted-foreground shadow-none"
                                 >
                                   {msg}
                                 </div>
@@ -351,21 +358,12 @@ function AssistantPage() {
                           )}
 
                           {isCurrent && step.messages.length === 0 && (
-                            <div className="mt-2 text-sm text-muted-foreground flex items-center gap-2">
-                              <Loader2 className="size-3 animate-spin" /> Starting...
+                            <div className="mt-2 text-xs text-brand flex items-center gap-2">
+                              <Loader2 className="size-3.5 animate-spin" />
+                              {t("assistant.waitingAgent", { agent: step.name })}
                             </div>
                           )}
                         </div>
-
-                        {/* Animated handoff arrow between agents if past */}
-                        {isPast && step.handoffMessage && (
-                          <div className="absolute -bottom-[38px] -left-[30px] flex items-center gap-4 text-xs font-medium text-brand/70">
-                            <ArrowDown className="size-5 animate-bounce text-brand" />
-                            <span className="bg-brand/10 px-2 py-0.5 rounded text-[10px] uppercase tracking-wider">
-                              {step.handoffMessage}
-                            </span>
-                          </div>
-                        )}
                       </div>
                     );
                   })}
@@ -373,66 +371,75 @@ function AssistantPage() {
               </div>
             </div>
 
+            {/* Schemes Results Column */}
             <div className="flex-1">
-              {showResults ? (
-                <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+              {showResults || candidateSchemes.length > 0 ? (
+                <div className="space-y-6">
                   <div className="flex items-center justify-between">
-                    <h2 className="text-xl font-display font-semibold">Matched Schemes</h2>
-                    <span className="text-sm bg-brand/10 text-brand px-3 py-1 rounded-full font-medium">
-                      96% evidence confidence
+                    <h2 className="text-xl font-display font-semibold">
+                      {t("assistant.matchedSchemes", "Discovered Matching Schemes")}
+                    </h2>
+                    <span className="text-xs bg-brand/10 text-brand px-3 py-1 rounded-full font-medium">
+                      Verified Catalog
                     </span>
                   </div>
 
-                  <p className="text-sm text-muted-foreground bg-card p-3 rounded-lg border border-line shadow-sm">
-                    Match score is a prioritization aid and is not an official government
-                    eligibility decision.
-                  </p>
-
                   <div className="grid gap-4">
-                    {MOCK_SCHEMES.map((scheme) => (
+                    {candidateSchemes.map((scheme) => (
                       <div
                         key={scheme.id}
-                        className="rounded-xl border border-line bg-card p-5 hover:border-brand/50 transition-colors cursor-pointer shadow-sm"
-                        onClick={() => setSelectedScheme(scheme)}
+                        className="rounded-xl border border-line bg-card p-5 hover:border-brand/40 transition-colors shadow-none"
                       >
                         <div className="flex justify-between items-start mb-3">
                           <div>
-                            <h3 className="font-semibold text-lg flex items-center gap-2">
+                            <span className="text-[11px] font-semibold uppercase tracking-wider text-brand-soft">
+                              {scheme.category}
+                            </span>
+                            <h3 className="font-semibold text-lg flex items-center gap-2 mt-0.5">
                               {scheme.name}
                               {scheme.official && <CheckCircle2 className="size-4 text-brand" />}
                             </h3>
-                            <p className="text-brand font-medium mt-1">{scheme.benefit}</p>
+                            <p className="text-brand font-medium text-sm mt-1">{scheme.benefit}</p>
                           </div>
                           <div className="text-right">
-                            <div className="text-xl font-bold text-sage">{scheme.match}%</div>
-                            <div className="text-xs text-muted-foreground">Match</div>
+                            <div className="text-xl font-bold font-display text-sage">{scheme.matchScore}%</div>
+                            <div className="text-[11px] text-muted-foreground">Match</div>
                           </div>
                         </div>
-                        <p className="text-sm text-muted-foreground mb-4">{scheme.summary}</p>
 
-                        <div className="flex gap-4 text-xs">
-                          <div>
-                            <span className="text-muted-foreground block mb-1">Required</span>
-                            <span className="font-medium">{scheme.reqDocs.length} Documents</span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground block mb-1">Last Verified</span>
-                            <span className="font-medium">{scheme.lastVerified}</span>
-                          </div>
+                        <p className="text-sm text-muted-foreground mb-4 leading-relaxed">{scheme.description}</p>
+
+                        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-line">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs text-brand hover:bg-brand/5 p-0 h-auto font-medium"
+                            onClick={() => setSelectedScheme(scheme)}
+                          >
+                            {t("assistant.viewEligibility", "View Eligibility Breakdown")} <ChevronRight className="size-3.5 ml-0.5" />
+                          </Button>
+
+                          <Button
+                            size="sm"
+                            onClick={() => navigate({ to: "/documents", search: { scheme: scheme.id } })}
+                          >
+                            {t("assistant.startApplication", { docCount: scheme.reqDocs?.length || 3 })}
+                            <ArrowRight className="size-3.5 ml-1.5" />
+                          </Button>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
               ) : (
-                <div className="hidden lg:flex h-[600px] items-center justify-center border-2 border-dashed border-line rounded-xl text-muted-foreground bg-card/50">
+                <div className="hidden lg:flex h-[500px] items-center justify-center border-2 border-dashed border-line rounded-xl text-muted-foreground bg-card/50">
                   <div className="text-center p-8">
-                    <Bot className="size-12 mx-auto mb-4 opacity-20" />
-                    <p>
-                      Results will appear here once the workforce completes its initial matching.
+                    <Loader2 className="size-10 mx-auto mb-4 text-brand animate-spin" />
+                    <p className="font-medium text-foreground">
+                      {t("assistant.processing", "Orchestrating AI workforce...")}
                     </p>
-                    <p className="text-sm mt-2 max-w-xs mx-auto">
-                      Evaluating citizen context, schemes, and determining eligibility.
+                    <p className="text-xs mt-1 max-w-xs mx-auto text-muted-foreground">
+                      Evaluating profile criteria, scheme rules, and required proofs in real time.
                     </p>
                   </div>
                 </div>
@@ -442,88 +449,77 @@ function AssistantPage() {
         )}
       </main>
 
+      {/* Scheme Eligibility Breakdown Dialog */}
       <Dialog open={!!selectedScheme} onOpenChange={() => setSelectedScheme(null)}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           {selectedScheme && (
             <>
               <DialogHeader>
-                <DialogTitle className="text-2xl">{selectedScheme.name}</DialogTitle>
+                <DialogTitle className="text-xl font-display">{selectedScheme.name}</DialogTitle>
+                <p className="text-xs text-muted-foreground">{selectedScheme.category} · {selectedScheme.benefit}</p>
               </DialogHeader>
 
-              <div className="mt-6 space-y-8">
+              <div className="mt-4 space-y-6">
                 <div>
-                  <h3 className="font-semibold mb-2 text-lg">
-                    Why Sahayak thinks this scheme matches
+                  <h3 className="font-semibold text-sm mb-1">
+                    {t("assistant.criteriaHeader", "Eligibility Criteria Evaluation")}
                   </h3>
-                  <p className="text-muted-foreground">4 of 5 criteria are currently verified.</p>
+                  <p className="text-xs text-muted-foreground">
+                    Rules evaluated automatically by Eligibility Agent and Document Agent.
+                  </p>
                 </div>
 
-                <div className="rounded-lg border border-line overflow-hidden shadow-sm">
-                  <table className="w-full text-sm text-left">
+                <div className="rounded-lg border border-line overflow-hidden">
+                  <table className="w-full text-xs text-left">
                     <thead className="bg-ice-2 text-muted-foreground">
                       <tr>
-                        <th className="px-4 py-3 font-medium">Criterion</th>
-                        <th className="px-4 py-3 font-medium">Citizen information</th>
-                        <th className="px-4 py-3 font-medium">Requirement</th>
-                        <th className="px-4 py-3 font-medium">Evidence</th>
-                        <th className="px-4 py-3 font-medium text-center">Result</th>
+                        <th className="px-3 py-2.5 font-medium">{t("assistant.rule", "Rule")}</th>
+                        <th className="px-3 py-2.5 font-medium">{t("assistant.yourInfo", "Your Profile Data")}</th>
+                        <th className="px-3 py-2.5 font-medium">{t("assistant.requirement", "Scheme Requirement")}</th>
+                        <th className="px-3 py-2.5 font-medium text-center">{t("assistant.status", "Status")}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-line bg-card">
-                      <tr>
-                        <td className="px-4 py-4 font-medium">Age</td>
-                        <td className="px-4 py-4 text-muted-foreground">20</td>
-                        <td className="px-4 py-4 text-muted-foreground">18–25</td>
-                        <td className="px-4 py-4 text-muted-foreground">Profile</td>
-                        <td className="px-4 py-4 text-center">
-                          <CheckCircle2 className="size-5 text-sage inline" />
-                        </td>
-                      </tr>
-                      <tr>
-                        <td className="px-4 py-4 font-medium">Student status</td>
-                        <td className="px-4 py-4 text-muted-foreground">Undergraduate</td>
-                        <td className="px-4 py-4 text-muted-foreground">Undergraduate</td>
-                        <td className="px-4 py-4 text-muted-foreground">Profile</td>
-                        <td className="px-4 py-4 text-center">
-                          <CheckCircle2 className="size-5 text-sage inline" />
-                        </td>
-                      </tr>
-                      <tr>
-                        <td className="px-4 py-4 font-medium">Household income</td>
-                        <td className="px-4 py-4 text-muted-foreground">₹2.1L</td>
-                        <td className="px-4 py-4 text-muted-foreground">Below ₹3L</td>
-                        <td className="px-4 py-4 text-muted-foreground">Income Certificate</td>
-                        <td className="px-4 py-4 text-center">
-                          <CheckCircle2 className="size-5 text-sage inline" />
-                        </td>
-                      </tr>
-                      <tr>
-                        <td className="px-4 py-4 font-medium">Residence</td>
-                        <td className="px-4 py-4 text-muted-foreground">Uttar Pradesh</td>
-                        <td className="px-4 py-4 text-muted-foreground">Applicable</td>
-                        <td className="px-4 py-4 text-muted-foreground">Profile</td>
-                        <td className="px-4 py-4 text-center">
-                          <CheckCircle2 className="size-5 text-sage inline" />
-                        </td>
-                      </tr>
-                      <tr className="bg-amber/5">
-                        <td className="px-4 py-4 font-medium">Enrollment certificate</td>
-                        <td className="px-4 py-4 text-amber font-medium">Missing</td>
-                        <td className="px-4 py-4 text-muted-foreground">Required</td>
-                        <td className="px-4 py-4 text-muted-foreground">—</td>
-                        <td className="px-4 py-4 text-center">
-                          <FileWarning className="size-5 text-amber inline" />
-                        </td>
-                      </tr>
+                      {schemeCriteria.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">
+                            <Loader2 className="size-4 animate-spin inline mr-2" /> Evaluating rules...
+                          </td>
+                        </tr>
+                      ) : (
+                        schemeCriteria.map((crit, idx) => (
+                          <tr key={idx} className={crit.status === "missing" ? "bg-amber/5" : ""}>
+                            <td className="px-3 py-3 font-medium text-foreground">{crit.name}</td>
+                            <td className="px-3 py-3 text-muted-foreground">{crit.citizenInfo}</td>
+                            <td className="px-3 py-3 text-muted-foreground">{crit.requirement}</td>
+                            <td className="px-3 py-3 text-center">
+                              {crit.status === "verified" ? (
+                                <CheckCircle2 className="size-4 text-sage inline" />
+                              ) : (
+                                <FileWarning className="size-4 text-amber inline" />
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
 
-                <div className="flex justify-end gap-3 pt-4 border-t border-line">
-                  <Button variant="outline" onClick={() => setSelectedScheme(null)}>
-                    Close
+                <div className="flex justify-end gap-3 pt-3 border-t border-line">
+                  <Button variant="outline" size="sm" onClick={() => setSelectedScheme(null)}>
+                    {t("common.close", "Close")}
                   </Button>
-                  <Button>Upload Missing Document</Button>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const schemeId = selectedScheme.id;
+                      setSelectedScheme(null);
+                      navigate({ to: "/documents", search: { scheme: schemeId } });
+                    }}
+                  >
+                    {t("assistant.uploadMissingDoc", "Upload Missing Document")}
+                  </Button>
                 </div>
               </div>
             </>
