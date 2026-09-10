@@ -45,10 +45,7 @@ export function LanguageSwitcher({ className }: { className?: string }) {
           data: { user },
         } = await supabase.auth.getUser();
         if (user) {
-          await supabase
-            .from("profiles")
-            .update({ preferred_language: code })
-            .eq("id", user.id);
+          await supabase.from("profiles").update({ preferred_language: code }).eq("id", user.id);
         }
       } catch {
         // non-blocking
@@ -76,7 +73,9 @@ export function LanguageSwitcher({ className }: { className?: string }) {
             onClick={() => handleLanguageChange(lang.code)}
             className="flex items-center justify-between cursor-pointer text-xs"
           >
-            <span>{lang.nativeName} ({lang.label})</span>
+            <span>
+              {lang.nativeName} ({lang.label})
+            </span>
             {i18n.language === lang.code && <Check className="size-3.5 text-brand" />}
           </DropdownMenuItem>
         ))}

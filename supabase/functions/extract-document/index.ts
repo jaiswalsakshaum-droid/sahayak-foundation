@@ -40,10 +40,10 @@ Deno.serve(async (req) => {
     // 1. Require a valid Authorization header — no impersonation fallback
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized: missing Authorization header" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ error: "Unauthorized: missing Authorization header" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const token = authHeader.replace("Bearer ", "");
@@ -53,10 +53,10 @@ Deno.serve(async (req) => {
     } = await supabaseAdmin.auth.getUser(token);
 
     if (authError || !user?.id) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized: invalid or expired token" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ error: "Unauthorized: invalid or expired token" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const citizenId = user.id;
@@ -66,10 +66,10 @@ Deno.serve(async (req) => {
     const documentId: string = body.document_id ?? "";
 
     if (!documentId) {
-      return new Response(
-        JSON.stringify({ error: "Bad request: document_id is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ error: "Bad request: document_id is required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     // 3. Verify the requesting citizen actually owns this document
@@ -80,10 +80,10 @@ Deno.serve(async (req) => {
       .single();
 
     if (docError || !docRecord) {
-      return new Response(
-        JSON.stringify({ error: "Document not found" }),
-        { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ error: "Document not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     if (docRecord.citizen_id !== citizenId) {
@@ -116,7 +116,8 @@ Deno.serve(async (req) => {
         status: "accepted",
         document_id: documentId,
         document_type: docRecord.document_type,
-        message: "Document intelligence extraction queued. Subscribe to the documents table for status updates.",
+        message:
+          "Document intelligence extraction queued. Subscribe to the documents table for status updates.",
       }),
       {
         status: 202,
@@ -125,12 +126,9 @@ Deno.serve(async (req) => {
     );
   } catch (err: any) {
     console.error("[extract-document] Unexpected error:", err);
-    return new Response(
-      JSON.stringify({ error: err.message || "Internal server error" }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      },
-    );
+    return new Response(JSON.stringify({ error: err.message || "Internal server error" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });

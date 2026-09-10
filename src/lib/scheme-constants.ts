@@ -11,8 +11,7 @@ export const CANONICAL_SCHEME_IDS = {
   SUKANYA_SAMRIDDHI: "a0000000-0000-0000-0000-000000000005",
 } as const;
 
-export type CanonicalSchemeId =
-  (typeof CANONICAL_SCHEME_IDS)[keyof typeof CANONICAL_SCHEME_IDS];
+export type CanonicalSchemeId = (typeof CANONICAL_SCHEME_IDS)[keyof typeof CANONICAL_SCHEME_IDS];
 
 export const CANONICAL_SCHEME_LIST: {
   id: CanonicalSchemeId;
@@ -49,11 +48,7 @@ export const CANONICAL_SCHEME_LIST: {
     description:
       "Income support scheme providing ₹6,000 per year directly into bank accounts of all landholding farmer families.",
     officialSource: "PM Kisan Portal",
-    documentRequirements: [
-      "Aadhaar Card",
-      "Land Ownership Record (RoR)",
-      "Bank Account Details",
-    ],
+    documentRequirements: ["Aadhaar Card", "Land Ownership Record (RoR)", "Bank Account Details"],
   },
   {
     id: CANONICAL_SCHEME_IDS.PMAY_U,

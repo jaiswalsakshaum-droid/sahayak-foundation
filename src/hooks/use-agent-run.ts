@@ -23,9 +23,9 @@ export const AGENT_STEPS = [
 export function useAgentRun() {
   const [runId, setRunId] = useState<string | null>(null);
   const [events, setEvents] = useState<LiveAgentEvent[]>([]);
-  const [status, setStatus] = useState<"IDLE" | "PROCESSING" | "ACTION_REQUIRED" | "COMPLETED" | "ERROR">(
-    "IDLE",
-  );
+  const [status, setStatus] = useState<
+    "IDLE" | "PROCESSING" | "ACTION_REQUIRED" | "COMPLETED" | "ERROR"
+  >("IDLE");
   const [activeAgentIndex, setActiveAgentIndex] = useState<number>(-1);
   const [latestData, setLatestData] = useState<Record<string, any>>({});
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
@@ -193,10 +193,7 @@ export function useAgentRun() {
           setStatus("ERROR");
         }
       } catch (err) {
-        console.warn(
-          "[useAgentRun] Edge function error:",
-          err,
-        );
+        console.warn("[useAgentRun] Edge function error:", err);
         // Don't clear timeout — let it fire naturally if no events arrive
       }
     }

@@ -92,7 +92,9 @@ function SignupPage() {
           <Card className="border-line bg-card shadow-sm relative overflow-hidden">
             {isSuccess && <div className="absolute top-0 left-0 w-full h-1 bg-sage" />}
             <CardHeader>
-              <CardTitle className="font-display text-2xl">{t("auth.signUpTitle", "Create your account")}</CardTitle>
+              <CardTitle className="font-display text-2xl">
+                {t("auth.signUpTitle", "Create your account")}
+              </CardTitle>
               <p className="text-sm text-muted-foreground">
                 {t("auth.signUpSubtitle", "Set up a private space for your benefit journey.")}
               </p>
@@ -150,7 +152,9 @@ function SignupPage() {
                     disabled={isLoading || !name || !mobile || !password}
                   >
                     {isLoading ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-                    {isLoading ? t("common.loading", "Creating account...") : t("auth.signUpButton", "Create Account")}
+                    {isLoading
+                      ? t("common.loading", "Creating account...")
+                      : t("auth.signUpButton", "Create Account")}
                     {!isLoading && <ArrowRight className="ml-2 size-4" />}
                   </Button>
                 )}

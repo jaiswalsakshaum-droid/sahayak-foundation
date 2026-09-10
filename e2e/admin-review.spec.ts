@@ -15,7 +15,9 @@ test.describe("Admin Human Review & Workforce Control E2E", () => {
   }) => {
     await page.goto("/admin");
 
-    await expect(page.locator("text=Administrative Human Review & Workforce Control").first()).toBeVisible();
+    await expect(
+      page.locator("text=Administrative Human Review & Workforce Control").first(),
+    ).toBeVisible();
     await expect(page.locator("text=Pending Human Review Queue").first()).toBeVisible();
     await expect(page.locator("text=Run Tracker Sweep Now").first()).toBeVisible();
   });

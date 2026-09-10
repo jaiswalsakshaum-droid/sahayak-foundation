@@ -18,7 +18,13 @@ import {
   Landmark,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { requireAdmin } from "@/lib/auth";
 import {
@@ -113,7 +119,8 @@ function AdminDashboard() {
 
         if (res.ok) {
           toast.success("Tracker Sweep Triggered", {
-            description: "Tracker Agent is scanning active review SLAs and writing timeline events.",
+            description:
+              "Tracker Agent is scanning active review SLAs and writing timeline events.",
           });
         } else {
           toast.info("Tracker Sweep Dispatched", {
@@ -168,7 +175,11 @@ function AdminDashboard() {
               disabled={isSweeping}
               className="gap-1.5 bg-card text-xs font-medium"
             >
-              {isSweeping ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5 text-brand" />}
+              {isSweeping ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="size-3.5 text-brand" />
+              )}
               <span>Trigger Tracker Sweep</span>
             </Button>
           </div>
@@ -224,7 +235,8 @@ function AdminDashboard() {
             <div>
               <h2 className="text-lg font-semibold font-display">Human Supervisory Review Queue</h2>
               <p className="text-xs text-muted-foreground">
-                Submitted applications awaiting human verification before final sanction. Decisions are written to immutable audit logs.
+                Submitted applications awaiting human verification before final sanction. Decisions
+                are written to immutable audit logs.
               </p>
             </div>
             <span className="text-xs font-semibold bg-amber/10 text-amber px-2.5 py-1 rounded-full border border-amber/20">
@@ -258,7 +270,9 @@ function AdminDashboard() {
                 <tbody className="divide-y divide-line bg-card">
                   {queue.map((app) => (
                     <tr key={app.id} className="hover:bg-ice-2/40 transition-colors">
-                      <td className="px-4 py-3 font-mono font-medium text-brand">{app.tracking_id}</td>
+                      <td className="px-4 py-3 font-mono font-medium text-brand">
+                        {app.tracking_id}
+                      </td>
                       <td className="px-4 py-3 font-medium text-foreground">{app.citizen_name}</td>
                       <td className="px-4 py-3 text-muted-foreground">{app.scheme_name}</td>
                       <td className="px-4 py-3">
@@ -318,7 +332,9 @@ function AdminDashboard() {
                 <DialogTitle className="text-lg font-display">
                   Review Application: {selectedApp.tracking_id}
                 </DialogTitle>
-                <p className="text-xs text-muted-foreground">{selectedApp.scheme_name} · {selectedApp.citizen_name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {selectedApp.scheme_name} · {selectedApp.citizen_name}
+                </p>
               </DialogHeader>
 
               <div className="mt-4 space-y-4 text-xs">
@@ -330,7 +346,9 @@ function AdminDashboard() {
                     {Object.entries(selectedApp.applicant_info).map(([k, v]: [string, any]) => (
                       <div key={k} className="p-2 rounded bg-card border border-line">
                         <span className="text-muted-foreground block text-[10px]">{k}</span>
-                        <span className="font-medium text-foreground">{typeof v === "object" ? v.value : String(v)}</span>
+                        <span className="font-medium text-foreground">
+                          {typeof v === "object" ? v.value : String(v)}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -339,7 +357,9 @@ function AdminDashboard() {
                 {selectedApp.source_run_id && (
                   <div className="p-3 rounded border border-line bg-card text-muted-foreground flex items-center justify-between">
                     <span>Source Agent Run ID</span>
-                    <span className="font-mono text-brand text-[11px]">{selectedApp.source_run_id}</span>
+                    <span className="font-mono text-brand text-[11px]">
+                      {selectedApp.source_run_id}
+                    </span>
                   </div>
                 )}
               </div>
@@ -377,7 +397,8 @@ function AdminDashboard() {
               <AlertCircle className="size-5" /> Reject Application
             </DialogTitle>
             <p className="text-xs text-muted-foreground">
-              Please enter the official rejection reason. This will be written to the immutable audit log and notified to the citizen.
+              Please enter the official rejection reason. This will be written to the immutable
+              audit log and notified to the citizen.
             </p>
           </DialogHeader>
 

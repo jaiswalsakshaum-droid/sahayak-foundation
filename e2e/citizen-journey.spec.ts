@@ -15,7 +15,9 @@ test.describe("Citizen Journey E2E", () => {
     await expect(page.locator("text=Tracker Agent").first()).toBeVisible();
 
     // Language switcher presence
-    const langTrigger = page.locator("button:has-text('English'), button:has-text('हिन्दी')").first();
+    const langTrigger = page
+      .locator("button:has-text('English'), button:has-text('हिन्दी')")
+      .first();
     if (await langTrigger.isVisible()) {
       await expect(langTrigger).toBeVisible();
     }
@@ -37,7 +39,9 @@ test.describe("Citizen Journey E2E", () => {
     await page.waitForURL("**/dashboard", { timeout: 10000 });
 
     // Assert dashboard metrics and agents
-    await expect(page.locator("text=Benefits discovered, text=Active applications").first()).toBeVisible();
+    await expect(
+      page.locator("text=Benefits discovered, text=Active applications").first(),
+    ).toBeVisible();
   });
 
   test("guided document checklist for canonical scheme", async ({ page }) => {

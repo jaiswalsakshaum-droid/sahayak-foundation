@@ -43,7 +43,8 @@ export const LOCAL_DEMO_SCHEMES_DB: SchemeMatch[] = [
     category: "Education",
     benefit: "₹12,000 / year",
     matchScore: 92,
-    description: "Financial support for meritorious students continuing secondary education in government and aided schools.",
+    description:
+      "Financial support for meritorious students continuing secondary education in government and aided schools.",
     official: true,
     reqDocs: ["Aadhaar Card", "Income Certificate", "Enrollment Certificate", "Bank Passbook"],
     lastVerified: "Today",
@@ -54,7 +55,8 @@ export const LOCAL_DEMO_SCHEMES_DB: SchemeMatch[] = [
     category: "Agriculture",
     benefit: "₹6,000 / year in 3 installments",
     matchScore: 98,
-    description: "Income support scheme providing ₹6,000 per year directly into bank accounts of all landholding farmer families.",
+    description:
+      "Income support scheme providing ₹6,000 per year directly into bank accounts of all landholding farmer families.",
     official: true,
     reqDocs: ["Aadhaar Card", "Land Ownership Record (RoR)", "Bank Account Details"],
     lastVerified: "Yesterday",
@@ -65,9 +67,15 @@ export const LOCAL_DEMO_SCHEMES_DB: SchemeMatch[] = [
     category: "Housing",
     benefit: "Up to ₹2.67 Lakh subsidy",
     matchScore: 85,
-    description: "Housing for all in urban areas through credit-linked interest subsidy and direct construction assistance.",
+    description:
+      "Housing for all in urban areas through credit-linked interest subsidy and direct construction assistance.",
     official: true,
-    reqDocs: ["Aadhaar Card", "Income Certificate", "Residence Proof", "Affidavit / Self Declaration"],
+    reqDocs: [
+      "Aadhaar Card",
+      "Income Certificate",
+      "Residence Proof",
+      "Affidavit / Self Declaration",
+    ],
     lastVerified: "1 week ago",
   },
   {
@@ -76,7 +84,8 @@ export const LOCAL_DEMO_SCHEMES_DB: SchemeMatch[] = [
     category: "Employment & Pension",
     benefit: "₹1,000 - ₹5,000 / month guaranteed pension",
     matchScore: 78,
-    description: "Guaranteed minimum pension for unorganized sector workers with government co-contribution.",
+    description:
+      "Guaranteed minimum pension for unorganized sector workers with government co-contribution.",
     official: true,
     reqDocs: ["Aadhaar Card", "Savings Bank Account Passbook"],
     lastVerified: "2 days ago",
@@ -87,7 +96,8 @@ export const LOCAL_DEMO_SCHEMES_DB: SchemeMatch[] = [
     category: "Women & Child",
     benefit: "High interest tax-free savings for girl child",
     matchScore: 88,
-    description: "Small deposit savings scheme targeted at building a fund for education and marriage expenses of girl children.",
+    description:
+      "Small deposit savings scheme targeted at building a fund for education and marriage expenses of girl children.",
     official: true,
     reqDocs: ["Birth Certificate of Girl Child", "Parent/Guardian Aadhaar Card", "Address Proof"],
     lastVerified: "Today",
@@ -244,7 +254,9 @@ export async function checkEligibility(
 
         const criteria: EligibilityCriterion[] = rules.map((r) => {
           const reqSource = (r.evidence_source || "").toLowerCase();
-          const isDocVerified = verifiedDocs.some((d) => reqSource.includes(d) || d.includes(reqSource));
+          const isDocVerified = verifiedDocs.some(
+            (d) => reqSource.includes(d) || d.includes(reqSource),
+          );
           const hasProfileInfo =
             (r.criterion_name.toLowerCase().includes("age") && profileData?.age) ||
             (r.criterion_name.toLowerCase().includes("income") && profileData?.annual_income);
@@ -314,7 +326,7 @@ export type DocumentValidationResult = {
  */
 export async function validateDocument(
   file: any,
-  documentType = "Identity Proof"
+  documentType = "Identity Proof",
 ): Promise<ServiceResult<DocumentValidationResult>> {
   if (!isSupabaseConfigured) {
     // Local demo offline mode
@@ -376,7 +388,9 @@ export async function validateDocument(
       .single();
 
     if (insertError || !insertedDoc?.id) {
-      return err(`Failed to register document in vault: ${insertError?.message || "Unknown error"}`);
+      return err(
+        `Failed to register document in vault: ${insertError?.message || "Unknown error"}`,
+      );
     }
 
     // Fire extraction Edge Function asynchronously for Groq Vision OCR
@@ -429,9 +443,7 @@ export type ApplicationDraft = {
  * Prepare application draft with real citizen profile data
  */
 export async function prepareApplication(schemeId: string): Promise<ApplicationDraft> {
-  const targetSchemeId = schemeId.startsWith("a000")
-    ? schemeId
-    : CANONICAL_SCHEME_IDS.NMMSS;
+  const targetSchemeId = schemeId.startsWith("a000") ? schemeId : CANONICAL_SCHEME_IDS.NMMSS;
 
   if (isSupabaseConfigured) {
     try {
@@ -460,10 +472,18 @@ export async function prepareApplication(schemeId: string): Promise<ApplicationD
             status: app.status,
             applicantInfo: app.applicant_info || {
               "Full Name": { value: profile?.full_name || "Citizen", status: "verified" },
-              "Age": { value: profile?.age ? `${profile.age}` : "—", status: profile?.age ? "verified" : "needs_review" },
-              "Location": { value: profile?.location || "—", status: profile?.location ? "verified" : "needs_review" },
+              Age: {
+                value: profile?.age ? `${profile.age}` : "—",
+                status: profile?.age ? "verified" : "needs_review",
+              },
+              Location: {
+                value: profile?.location || "—",
+                status: profile?.location ? "verified" : "needs_review",
+              },
               "Annual Income": {
-                value: profile?.annual_income ? `₹${Number(profile.annual_income).toLocaleString()}` : "—",
+                value: profile?.annual_income
+                  ? `₹${Number(profile.annual_income).toLocaleString()}`
+                  : "—",
                 status: profile?.annual_income ? "verified" : "needs_review",
               },
             },
@@ -477,12 +497,24 @@ export async function prepareApplication(schemeId: string): Promise<ApplicationD
         const draftId = `SAH-2026-${Math.floor(100000 + Math.random() * 900000)}`;
         const applicantInfo = {
           "Full Name": { value: profile?.full_name || "Citizen", status: "verified" as const },
-          "Age": { value: profile?.age ? `${profile.age}` : "—", status: profile?.age ? "verified" as const : "needs_review" as const },
-          "Location": { value: profile?.location || "—", status: profile?.location ? "verified" as const : "needs_review" as const },
-          "Occupation": { value: profile?.occupation || "—", status: profile?.occupation ? "verified" as const : "needs_review" as const },
+          Age: {
+            value: profile?.age ? `${profile.age}` : "—",
+            status: profile?.age ? ("verified" as const) : ("needs_review" as const),
+          },
+          Location: {
+            value: profile?.location || "—",
+            status: profile?.location ? ("verified" as const) : ("needs_review" as const),
+          },
+          Occupation: {
+            value: profile?.occupation || "—",
+            status: profile?.occupation ? ("verified" as const) : ("needs_review" as const),
+          },
           "Annual Income": {
-            value: profile?.annual_income ? `₹${Number(profile.annual_income).toLocaleString()}` : "—",
-            status: profile?.annual_income ? "verified" as const : "needs_review" as const },
+            value: profile?.annual_income
+              ? `₹${Number(profile.annual_income).toLocaleString()}`
+              : "—",
+            status: profile?.annual_income ? ("verified" as const) : ("needs_review" as const),
+          },
         };
 
         await supabase.from("applications").insert({
@@ -532,7 +564,7 @@ export async function prepareApplication(schemeId: string): Promise<ApplicationD
  */
 export async function recordConsent(
   applicationId: string,
-  citizenId?: string
+  citizenId?: string,
 ): Promise<ServiceResult<boolean>> {
   if (!isSupabaseConfigured) {
     return ok(true);
@@ -558,7 +590,8 @@ export async function recordConsent(
 
     const { error } = await supabase.from("consent_records").insert({
       citizen_id: effectiveCitizenId,
-      application_id: resolvedAppId.includes("-") && resolvedAppId.length === 36 ? resolvedAppId : null,
+      application_id:
+        resolvedAppId.includes("-") && resolvedAppId.length === 36 ? resolvedAppId : null,
       purpose: "Authorization to submit application to government scheme portal",
       shared_data: ["Identity Proof (Aadhaar)", "Income Certificate", "Profile Information"],
       approved_at: new Date().toISOString(),
@@ -578,7 +611,7 @@ export async function recordConsent(
  * Submit verified application with honest error handling
  */
 export async function submitApplication(
-  applicationId: string
+  applicationId: string,
 ): Promise<ServiceResult<{ trackingId: string }>> {
   const generatedTrackingId = applicationId.startsWith("SAH-")
     ? applicationId

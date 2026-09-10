@@ -73,9 +73,11 @@ export async function getApplicationsByStage(): Promise<ServiceResult<StageCount
     if (!rpcError && Array.isArray(rpcData) && rpcData.length > 0) {
       return ok(
         rpcData.map((row: any) => ({
-          name: row.name ? row.name.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()) : "Unknown",
+          name: row.name
+            ? row.name.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())
+            : "Unknown",
           count: Number(row.count) || 0,
-        }))
+        })),
       );
     }
 
@@ -127,7 +129,7 @@ export async function getDocumentVolumeByDay(days = 7): Promise<ServiceResult<Vo
         rpcData.map((row: any) => ({
           name: row.name,
           count: Number(row.count) || 0,
-        }))
+        })),
       );
     }
 
@@ -180,7 +182,7 @@ export async function getAgentTaskDistribution(): Promise<ServiceResult<TaskDist
         rpcData.map((row: any) => ({
           name: row.name || "Agent",
           value: Number(row.value) || 0,
-        }))
+        })),
       );
     }
 
@@ -209,7 +211,9 @@ export async function getAgentTaskDistribution(): Promise<ServiceResult<TaskDist
 /**
  * Fetch monthly application completion & approval rates
  */
-export async function getCompletionRateByMonth(months = 6): Promise<ServiceResult<CompletionRateMonth[]>> {
+export async function getCompletionRateByMonth(
+  months = 6,
+): Promise<ServiceResult<CompletionRateMonth[]>> {
   if (!isSupabaseConfigured) {
     return ok(LOCAL_DEMO_COMPLETION_RATES);
   }
@@ -223,7 +227,7 @@ export async function getCompletionRateByMonth(months = 6): Promise<ServiceResul
         rpcData.map((row: any) => ({
           name: row.name,
           rate: Number(row.rate) || 0,
-        }))
+        })),
       );
     }
 

@@ -47,7 +47,14 @@ describe("Agent Workforce Roster", () => {
   it("includes all 6 specialized agents including Tracker Agent", () => {
     expect(SAHAYAK_AGENT_ROSTER).toHaveLength(6);
     const keys = SAHAYAK_AGENT_ROSTER.map((a) => a.key);
-    expect(keys).toEqual(["citizen", "scheme", "eligibility", "document", "application", "tracker"]);
+    expect(keys).toEqual([
+      "citizen",
+      "scheme",
+      "eligibility",
+      "document",
+      "application",
+      "tracker",
+    ]);
   });
 
   it("defines standard citizen journey steps", () => {

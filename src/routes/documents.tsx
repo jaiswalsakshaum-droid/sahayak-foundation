@@ -100,12 +100,12 @@ function DocumentsPage() {
               doc.status === "verified"
                 ? "Verified"
                 : doc.status === "needs_review"
-                ? "Needs Review"
-                : doc.status === "pending"
-                ? "Pending"
-                : doc.status === "missing"
-                ? "Missing"
-                : doc.status || "Verified",
+                  ? "Needs Review"
+                  : doc.status === "pending"
+                    ? "Pending"
+                    : doc.status === "missing"
+                      ? "Missing"
+                      : doc.status || "Verified",
             date: doc.created_at ? new Date(doc.created_at).toLocaleDateString() : "Recently",
             extractedFields: doc.extracted_fields || {},
           }));
@@ -147,10 +147,10 @@ function DocumentsPage() {
                 doc.status === "verified"
                   ? "Verified"
                   : doc.status === "needs_review"
-                  ? "Needs Review"
-                  : doc.status === "pending"
-                  ? "Pending"
-                  : doc.status || "Verified",
+                    ? "Needs Review"
+                    : doc.status === "pending"
+                      ? "Pending"
+                      : doc.status || "Verified",
               date: doc.created_at ? new Date(doc.created_at).toLocaleDateString() : "Recently",
               extractedFields: doc.extracted_fields || {},
             };
@@ -165,7 +165,7 @@ function DocumentsPage() {
               return [updatedItem, ...prev];
             });
           }
-        }
+        },
       )
       .subscribe();
 
@@ -184,7 +184,7 @@ function DocumentsPage() {
         (doc) =>
           doc.type.toLowerCase().includes(req.toLowerCase()) ||
           doc.name.toLowerCase().includes(req.toLowerCase()) ||
-          req.toLowerCase().includes(doc.type.toLowerCase())
+          req.toLowerCase().includes(doc.type.toLowerCase()),
       );
 
       const status = matchingDoc ? matchingDoc.status : "Missing";
@@ -268,7 +268,7 @@ function DocumentsPage() {
             <p className="text-sm text-muted-foreground">
               {t(
                 "documents.subtitle",
-                "Upload and manage credentials verified by Sahayak's multimodal Document Agent."
+                "Upload and manage credentials verified by Sahayak's multimodal Document Agent.",
               )}
             </p>
           </div>
@@ -298,8 +298,8 @@ function DocumentsPage() {
                       item.isVerified
                         ? "border-sage/30 bg-sage/5"
                         : item.status === "Needs Review"
-                        ? "border-amber/30 bg-amber/5"
-                        : "border-line bg-ice-2/50"
+                          ? "border-amber/30 bg-amber/5"
+                          : "border-line bg-ice-2/50"
                     }`}
                   >
                     <div className="flex items-center gap-3">
@@ -308,8 +308,8 @@ function DocumentsPage() {
                           item.isVerified
                             ? "bg-sage text-white"
                             : item.status === "Needs Review"
-                            ? "bg-amber text-white"
-                            : "bg-mist text-muted-foreground"
+                              ? "bg-amber text-white"
+                              : "bg-mist text-muted-foreground"
                         }`}
                       >
                         {item.isVerified ? <Check className="size-4" /> : "!"}
@@ -320,8 +320,8 @@ function DocumentsPage() {
                           {item.isVerified
                             ? "Verified evidence available"
                             : item.status === "Needs Review"
-                            ? "Needs citizen verification"
-                            : "Required for complete eligibility"}
+                              ? "Needs citizen verification"
+                              : "Required for complete eligibility"}
                         </p>
                       </div>
                     </div>
@@ -356,7 +356,11 @@ function DocumentsPage() {
                       </p>
                     </div>
                   </div>
-                  <Button asChild size="sm" className="bg-sage hover:bg-sage/90 text-white shrink-0">
+                  <Button
+                    asChild
+                    size="sm"
+                    className="bg-sage hover:bg-sage/90 text-white shrink-0"
+                  >
                     <Link to="/applications">
                       Proceed to Application <ArrowRight className="size-3.5 ml-1" />
                     </Link>
@@ -379,9 +383,15 @@ function DocumentsPage() {
             <div className="grid gap-2.5">
               {documentsList
                 .filter((d) =>
-                  ["Missing", "Needs Review", "Expired", "Pending", "pending", "needs_review", "missing"].includes(
-                    d.status
-                  )
+                  [
+                    "Missing",
+                    "Needs Review",
+                    "Expired",
+                    "Pending",
+                    "pending",
+                    "needs_review",
+                    "missing",
+                  ].includes(d.status),
                 )
                 .map((doc, idx) => (
                   <div
@@ -476,7 +486,9 @@ function DocumentsPage() {
                 />
                 <UploadCloud className="size-10 text-brand mb-3" />
                 <p className="font-medium text-foreground mb-1 text-sm">Drop document here</p>
-                <p className="text-xs text-muted-foreground mb-4">or click to browse (Images, PDF)</p>
+                <p className="text-xs text-muted-foreground mb-4">
+                  or click to browse (Images, PDF)
+                </p>
                 <Button
                   variant="outline"
                   size="sm"

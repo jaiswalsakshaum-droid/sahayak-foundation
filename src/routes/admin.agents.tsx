@@ -394,7 +394,9 @@ function AdminAgentsPage() {
                       <span className="font-semibold text-foreground">{event.agent}</span>
                       <span className="font-mono text-[11px]">{event.timestamp}</span>
                     </div>
-                    <p className="font-medium text-xs leading-relaxed text-foreground/90">{event.action}</p>
+                    <p className="font-medium text-xs leading-relaxed text-foreground/90">
+                      {event.action}
+                    </p>
                     {event.run_id && (
                       <div className="mt-1.5 pt-1.5 border-t border-line/60 flex items-center justify-between text-[10px] text-muted-foreground font-mono">
                         <span>Run: #{event.run_id.slice(0, 8)}</span>

@@ -84,7 +84,9 @@ Deno.serve(async (req) => {
 
     const errors: string[] = [];
 
-    const { error: schemesErr } = await supabaseAdmin.from("schemes").upsert(demoSchemes, { onConflict: "id" });
+    const { error: schemesErr } = await supabaseAdmin
+      .from("schemes")
+      .upsert(demoSchemes, { onConflict: "id" });
     if (schemesErr) errors.push(`Schemes error: ${schemesErr.message}`);
 
     // 2. Upsert Eligibility Rules
@@ -178,7 +180,7 @@ Deno.serve(async (req) => {
         errors.push(`listUsers error: ${listUserErr.message}`);
       }
       const existingUser = userListData?.users?.find(
-        (u) => u.email === "rahul@sahayak.demo" || u.email === "rahul.sharma@example.gov.in"
+        (u) => u.email === "rahul@sahayak.demo" || u.email === "rahul.sharma@example.gov.in",
       );
 
       if (existingUser) {
@@ -206,32 +208,38 @@ Deno.serve(async (req) => {
 
     // 5. Upsert Citizen Profile, Application, and Documents using the real user ID
     if (demoCitizenId) {
-      const { error: profileErr } = await supabaseAdmin.from("profiles").upsert({
-        id: demoCitizenId,
-        full_name: "Rahul Sharma",
-        age: 20,
-        gender: "Male",
-        annual_income: 210000,
-        occupation: "Student / Agricultural Assistant",
-        state: "Uttar Pradesh",
-        district: "Lucknow",
-        caste_category: "OBC",
-        is_student: true,
-        is_farmer: false,
-      }, { onConflict: "id" });
+      const { error: profileErr } = await supabaseAdmin.from("profiles").upsert(
+        {
+          id: demoCitizenId,
+          full_name: "Rahul Sharma",
+          age: 20,
+          gender: "Male",
+          annual_income: 210000,
+          occupation: "Student / Agricultural Assistant",
+          state: "Uttar Pradesh",
+          district: "Lucknow",
+          caste_category: "OBC",
+          is_student: true,
+          is_farmer: false,
+        },
+        { onConflict: "id" },
+      );
       if (profileErr) errors.push(`Profile error: ${profileErr.message}`);
 
       // Upsert In-Progress Application (awaiting missing enrollment cert)
-      const { error: appErr } = await supabaseAdmin.from("applications").upsert({
-        citizen_id: demoCitizenId,
-        scheme_id: "a0000000-0000-0000-0000-000000000001",
-        status: "under_review",
-        tracking_id: "SAH-2026-DEMO01",
-        applicant_info: {
-          "Full Name": { value: "Rahul Sharma", status: "verified" },
-          "Annual Income": { value: "₹2,10,000", status: "verified" },
+      const { error: appErr } = await supabaseAdmin.from("applications").upsert(
+        {
+          citizen_id: demoCitizenId,
+          scheme_id: "a0000000-0000-0000-0000-000000000001",
+          status: "under_review",
+          tracking_id: "SAH-2026-DEMO01",
+          applicant_info: {
+            "Full Name": { value: "Rahul Sharma", status: "verified" },
+            "Annual Income": { value: "₹2,10,000", status: "verified" },
+          },
         },
-      }, { onConflict: "citizen_id,scheme_id" });
+        { onConflict: "citizen_id,scheme_id" },
+      );
       if (appErr) errors.push(`Application error: ${appErr.message}`);
 
       // Upsert Citizen's Verified Documents (Aadhaar & Income on file, Enrollment missing)
@@ -242,7 +250,11 @@ Deno.serve(async (req) => {
           status: "verified",
           confidence: 0.98,
           file_name: "aadhaar_rahul_sharma.pdf",
-          extracted_fields: { Name: "Rahul Sharma", DOB: "15-08-2004", "ID Number": "XXXX-XXXX-4321" },
+          extracted_fields: {
+            Name: "Rahul Sharma",
+            DOB: "15-08-2004",
+            "ID Number": "XXXX-XXXX-4321",
+          },
         },
         {
           citizen_id: demoCitizenId,
@@ -250,7 +262,11 @@ Deno.serve(async (req) => {
           status: "verified",
           confidence: 0.95,
           file_name: "income_cert_2026.pdf",
-          extracted_fields: { Name: "Rahul Sharma", "Annual Income": "₹2,10,000", "Issue Date": "2026-04-10" },
+          extracted_fields: {
+            Name: "Rahul Sharma",
+            "Annual Income": "₹2,10,000",
+            "Issue Date": "2026-04-10",
+          },
         },
       ]);
       if (docErr) errors.push(`Documents error: ${docErr.message}`);

@@ -354,7 +354,8 @@ export async function getPendingReviewApplications(): Promise<PendingReviewAppli
   try {
     const { data, error } = await supabase
       .from("applications")
-      .select(`
+      .select(
+        `
         id,
         tracking_id,
         citizen_id,
@@ -366,7 +367,8 @@ export async function getPendingReviewApplications(): Promise<PendingReviewAppli
         admin_notes,
         profiles (full_name),
         schemes (name)
-      `)
+      `,
+      )
       .in("status", ["submitted", "under_review", "awaiting_approval"])
       .order("created_at", { ascending: false });
 
@@ -399,7 +401,7 @@ export async function getPendingReviewApplications(): Promise<PendingReviewAppli
 export async function reviewApplication(
   applicationId: string,
   action: "approved" | "rejected",
-  notes?: string
+  notes?: string,
 ): Promise<ServiceResult<boolean>> {
   if (!isSupabaseConfigured) {
     return ok(true);
@@ -437,7 +439,9 @@ export async function reviewApplication(
         run_id: appRow.source_run_id || null,
         agent_name: "Human Reviewer",
         action: action === "approved" ? "APPLICATION_APPROVED" : "APPLICATION_REJECTED",
-        evidence: notes || (action === "approved" ? "Approved as submitted." : "Rejected by department reviewer."),
+        evidence:
+          notes ||
+          (action === "approved" ? "Approved as submitted." : "Rejected by department reviewer."),
         result: action.toUpperCase(),
       });
     } catch (auditErr) {
@@ -481,9 +485,21 @@ export const MOCK_SCHEMES_DATA = CANONICAL_SCHEME_LIST.map((s) => ({
   benefit: s.benefit,
   description: s.description,
   rules: [
-    { criterion: "Age & Enrollment", requirement: "Must meet target criteria", verifiedBy: "Eligibility Agent" },
-    { criterion: "Income Threshold", requirement: "Below maximum ceiling", verifiedBy: "Eligibility Agent" },
-    { criterion: "Jurisdiction / Residence", requirement: "Domicile verified", verifiedBy: "Eligibility Agent" },
+    {
+      criterion: "Age & Enrollment",
+      requirement: "Must meet target criteria",
+      verifiedBy: "Eligibility Agent",
+    },
+    {
+      criterion: "Income Threshold",
+      requirement: "Below maximum ceiling",
+      verifiedBy: "Eligibility Agent",
+    },
+    {
+      criterion: "Jurisdiction / Residence",
+      requirement: "Domicile verified",
+      verifiedBy: "Eligibility Agent",
+    },
   ],
   documents: s.documentRequirements.map((d) => ({
     name: d,
@@ -491,4 +507,3 @@ export const MOCK_SCHEMES_DATA = CANONICAL_SCHEME_LIST.map((s) => ({
     acceptedFormats: "PDF, JPG, PNG",
   })),
 }));
-

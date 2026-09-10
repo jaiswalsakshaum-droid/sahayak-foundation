@@ -23,7 +23,12 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { requireAuth } from "@/lib/auth";
 import { useAgentRun } from "@/hooks/use-agent-run";
-import { findRelevantSchemes, understandCitizenNeed, checkEligibility, type SchemeMatch } from "@/lib/services";
+import {
+  findRelevantSchemes,
+  understandCitizenNeed,
+  checkEligibility,
+  type SchemeMatch,
+} from "@/lib/services";
 import { LanguageSwitcher } from "@/components/sahayak";
 
 export const Route = createFileRoute("/assistant")({
@@ -52,7 +57,8 @@ export function AssistantPage() {
   const [selectedScheme, setSelectedScheme] = useState<SchemeMatch | null>(null);
   const [schemeCriteria, setSchemeCriteria] = useState<any[]>([]);
 
-  const { runId, events, status, activeAgentIndex, latestData, isReconnecting, startRun } = useAgentRun();
+  const { runId, events, status, activeAgentIndex, latestData, isReconnecting, startRun } =
+    useAgentRun();
 
   const [journeySteps, setJourneySteps] = useState<JourneyStep[]>([
     {
@@ -151,7 +157,7 @@ export function AssistantPage() {
           official: true,
           reqDocs: ["Aadhaar Card", "Income Certificate"],
           lastVerified: "Today",
-        }))
+        })),
       );
     }
 
@@ -231,13 +237,19 @@ export function AssistantPage() {
               {t("assistant.title", "What benefit or support are you looking for today?")}
             </h1>
             <p className="text-muted-foreground mb-8 text-base">
-              {t("assistant.subtitle", "Speak or type in your language. 6 specialized AI agents will verify rules, check documents, and draft applications with your consent.")}
+              {t(
+                "assistant.subtitle",
+                "Speak or type in your language. 6 specialized AI agents will verify rules, check documents, and draft applications with your consent.",
+              )}
             </p>
 
             <div className="w-full relative mb-8">
               <textarea
                 className="w-full min-h-[120px] rounded-xl border border-line bg-card p-4 pr-12 text-base resize-none focus:outline-none focus:ring-2 focus:ring-brand shadow-sm"
-                placeholder={t("assistant.inputPlaceholder", "e.g., I am a college student from UP needing scholarship support...")}
+                placeholder={t(
+                  "assistant.inputPlaceholder",
+                  "e.g., I am a college student from UP needing scholarship support...",
+                )}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
               />
@@ -289,7 +301,10 @@ export function AssistantPage() {
                         {t("assistant.errorTitle", "Assistant Encountered an Issue")}
                       </h3>
                       <p className="text-xs text-muted-foreground mt-1">
-                        {t("assistant.errorDesc", "Unable to complete agent workflow. Please check your connection and try again.")}
+                        {t(
+                          "assistant.errorDesc",
+                          "Unable to complete agent workflow. Please check your connection and try again.",
+                        )}
                       </p>
                       <Button
                         size="sm"
@@ -338,7 +353,11 @@ export function AssistantPage() {
                         <div className="pl-2">
                           <h3
                             className={`font-medium text-sm ${
-                              isCurrent ? "text-brand font-semibold" : isPast ? "text-foreground" : "text-muted-foreground"
+                              isCurrent
+                                ? "text-brand font-semibold"
+                                : isPast
+                                  ? "text-foreground"
+                                  : "text-muted-foreground"
                             }`}
                           >
                             {step.name}
@@ -402,12 +421,16 @@ export function AssistantPage() {
                             <p className="text-brand font-medium text-sm mt-1">{scheme.benefit}</p>
                           </div>
                           <div className="text-right">
-                            <div className="text-xl font-bold font-display text-sage">{scheme.matchScore}%</div>
+                            <div className="text-xl font-bold font-display text-sage">
+                              {scheme.matchScore}%
+                            </div>
                             <div className="text-[11px] text-muted-foreground">Match</div>
                           </div>
                         </div>
 
-                        <p className="text-sm text-muted-foreground mb-4 leading-relaxed">{scheme.description}</p>
+                        <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
+                          {scheme.description}
+                        </p>
 
                         <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-line">
                           <Button
@@ -416,14 +439,19 @@ export function AssistantPage() {
                             className="text-xs text-brand hover:bg-brand/5 p-0 h-auto font-medium"
                             onClick={() => setSelectedScheme(scheme)}
                           >
-                            {t("assistant.viewEligibility", "View Eligibility Breakdown")} <ChevronRight className="size-3.5 ml-0.5" />
+                            {t("assistant.viewEligibility", "View Eligibility Breakdown")}{" "}
+                            <ChevronRight className="size-3.5 ml-0.5" />
                           </Button>
 
                           <Button
                             size="sm"
-                            onClick={() => navigate({ to: "/documents", search: { scheme: scheme.id } })}
+                            onClick={() =>
+                              navigate({ to: "/documents", search: { scheme: scheme.id } })
+                            }
                           >
-                            {t("assistant.startApplication", { docCount: scheme.reqDocs?.length || 3 })}
+                            {t("assistant.startApplication", {
+                              docCount: scheme.reqDocs?.length || 3,
+                            })}
                             <ArrowRight className="size-3.5 ml-1.5" />
                           </Button>
                         </div>
@@ -456,7 +484,9 @@ export function AssistantPage() {
             <>
               <DialogHeader>
                 <DialogTitle className="text-xl font-display">{selectedScheme.name}</DialogTitle>
-                <p className="text-xs text-muted-foreground">{selectedScheme.category} · {selectedScheme.benefit}</p>
+                <p className="text-xs text-muted-foreground">
+                  {selectedScheme.category} · {selectedScheme.benefit}
+                </p>
               </DialogHeader>
 
               <div className="mt-4 space-y-6">
@@ -474,16 +504,23 @@ export function AssistantPage() {
                     <thead className="bg-ice-2 text-muted-foreground">
                       <tr>
                         <th className="px-3 py-2.5 font-medium">{t("assistant.rule", "Rule")}</th>
-                        <th className="px-3 py-2.5 font-medium">{t("assistant.yourInfo", "Your Profile Data")}</th>
-                        <th className="px-3 py-2.5 font-medium">{t("assistant.requirement", "Scheme Requirement")}</th>
-                        <th className="px-3 py-2.5 font-medium text-center">{t("assistant.status", "Status")}</th>
+                        <th className="px-3 py-2.5 font-medium">
+                          {t("assistant.yourInfo", "Your Profile Data")}
+                        </th>
+                        <th className="px-3 py-2.5 font-medium">
+                          {t("assistant.requirement", "Scheme Requirement")}
+                        </th>
+                        <th className="px-3 py-2.5 font-medium text-center">
+                          {t("assistant.status", "Status")}
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-line bg-card">
                       {schemeCriteria.length === 0 ? (
                         <tr>
                           <td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">
-                            <Loader2 className="size-4 animate-spin inline mr-2" /> Evaluating rules...
+                            <Loader2 className="size-4 animate-spin inline mr-2" /> Evaluating
+                            rules...
                           </td>
                         </tr>
                       ) : (

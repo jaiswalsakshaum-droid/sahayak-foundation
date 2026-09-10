@@ -39,10 +39,10 @@ Deno.serve(async (req) => {
     // 1. Require a valid Authorization header — no citizen impersonation fallback
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized: missing Authorization header" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ error: "Unauthorized: missing Authorization header" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const token = authHeader.replace("Bearer ", "");
@@ -52,10 +52,10 @@ Deno.serve(async (req) => {
     } = await supabaseAdmin.auth.getUser(token);
 
     if (authError || !user?.id) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized: invalid or expired token" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ error: "Unauthorized: invalid or expired token" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
     const citizenId = user.id; // no fallback default, ever

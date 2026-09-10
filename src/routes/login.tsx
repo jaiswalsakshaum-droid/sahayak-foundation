@@ -54,7 +54,10 @@ function LoginPage() {
   return (
     <AuthLayout
       title={t("auth.signInTitle", "Welcome back to Sahayak")}
-      description={t("auth.signInSubtitle", "Log in to your citizen portal or administrative dashboard")}
+      description={t(
+        "auth.signInSubtitle",
+        "Log in to your citizen portal or administrative dashboard",
+      )}
     >
       <Card className="border-line bg-card shadow-sm relative overflow-hidden">
         {isSuccess && <div className="absolute top-0 left-0 w-full h-1 bg-sage" />}
@@ -62,8 +65,12 @@ function LoginPage() {
           <div className="grid size-10 place-items-center rounded-lg bg-brand/10 text-brand">
             <LockKeyhole className="size-5" />
           </div>
-          <CardTitle className="mt-4 font-display text-2xl">{t("auth.signInButton", "Sign In")}</CardTitle>
-          <p className="text-sm text-muted-foreground">{t("auth.signInSubtitle", "Access your civic assistant workspace.")}</p>
+          <CardTitle className="mt-4 font-display text-2xl">
+            {t("auth.signInButton", "Sign In")}
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            {t("auth.signInSubtitle", "Access your civic assistant workspace.")}
+          </p>
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={handleLogin}>
@@ -106,7 +113,9 @@ function LoginPage() {
             ) : (
               <Button type="submit" className="w-full" disabled={isLoading || !email || !password}>
                 {isLoading ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-                {isLoading ? t("common.loading", "Signing in...") : t("auth.signInButton", "Sign In")}
+                {isLoading
+                  ? t("common.loading", "Signing in...")
+                  : t("auth.signInButton", "Sign In")}
                 {!isLoading && <ArrowRight className="ml-2 size-4" />}
               </Button>
             )}

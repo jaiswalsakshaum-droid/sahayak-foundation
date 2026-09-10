@@ -40,7 +40,9 @@ export function ApplicationDetailPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [missingRequirements, setMissingRequirements] = useState<string[]>([]);
   const [consentChecked, setConsentChecked] = useState(false);
-  const [timeline, setTimeline] = useState<{ step: string; status: "completed" | "current" | "pending" }[]>([]);
+  const [timeline, setTimeline] = useState<
+    { step: string; status: "completed" | "current" | "pending" }[]
+  >([]);
 
   useEffect(() => {
     let isMounted = true;
@@ -54,7 +56,8 @@ export function ApplicationDetailPage() {
         if (isSupabaseConfigured) {
           const { data: appData } = await supabase
             .from("applications")
-            .select(`
+            .select(
+              `
               id,
               tracking_id,
               status,
@@ -72,7 +75,8 @@ export function ApplicationDetailPage() {
                   is_mandatory
                 )
               )
-            `)
+            `,
+            )
             .or(`id.eq.${id},tracking_id.eq.${id}`)
             .maybeSingle();
 
@@ -88,14 +92,14 @@ export function ApplicationDetailPage() {
                 .eq("status", "verified");
 
               const verifiedTypes = new Set(
-                (citizenDocs || []).map((d) => d.document_type.toLowerCase())
+                (citizenDocs || []).map((d) => d.document_type.toLowerCase()),
               );
 
               const schemeReqs = (appData.schemes as any)?.document_requirements || [];
               const missing = schemeReqs
                 .filter(
                   (req: any) =>
-                    req.is_mandatory && !verifiedTypes.has(req.document_type.toLowerCase())
+                    req.is_mandatory && !verifiedTypes.has(req.document_type.toLowerCase()),
                 )
                 .map((req: any) => req.document_type);
 
@@ -162,17 +166,18 @@ export function ApplicationDetailPage() {
     }
   };
 
-  const schemeName =
-    (application?.schemes as any)?.name || "National Means-cum-Merit Scholarship";
+  const schemeName = (application?.schemes as any)?.name || "National Means-cum-Merit Scholarship";
   const schemeBenefit = (application?.schemes as any)?.benefit || "₹12,000 / year";
   const trackingRef = application?.tracking_id || id;
 
   const applicantInfoData = application?.applicant_info || {
     "Full Name": { value: profile?.full_name || "Citizen Applicant", status: "verified" },
-    "Age": { value: profile?.age ? `${profile.age}` : "20", status: "verified" },
-    "Location": { value: profile?.location || "Lucknow, Uttar Pradesh", status: "verified" },
+    Age: { value: profile?.age ? `${profile.age}` : "20", status: "verified" },
+    Location: { value: profile?.location || "Lucknow, Uttar Pradesh", status: "verified" },
     "Annual Income": {
-      value: profile?.annual_income ? `₹${Number(profile.annual_income).toLocaleString()}` : "₹2,10,000",
+      value: profile?.annual_income
+        ? `₹${Number(profile.annual_income).toLocaleString()}`
+        : "₹2,10,000",
       status: "verified",
     },
   };
@@ -214,7 +219,9 @@ export function ApplicationDetailPage() {
                 <span className="font-mono font-medium">{trackingRef}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">{t("applications.currentStage", "Current Stage")}</span>
+                <span className="text-muted-foreground">
+                  {t("applications.currentStage", "Current Stage")}
+                </span>
                 <span className="font-medium capitalize text-brand">
                   {application?.status?.replace(/_/g, " ") || "Awaiting Approval"}
                 </span>
@@ -285,7 +292,11 @@ export function ApplicationDetailPage() {
                   Missing Mandatory Proofs
                 </h4>
                 <p className="text-xs text-foreground mt-0.5">
-                  {t("applications.missingDocsWarning", "Cannot submit yet: Please upload and verify all mandatory documents first.")} ({missingRequirements.join(", ")})
+                  {t(
+                    "applications.missingDocsWarning",
+                    "Cannot submit yet: Please upload and verify all mandatory documents first.",
+                  )}{" "}
+                  ({missingRequirements.join(", ")})
                 </p>
                 <Button
                   size="sm"
@@ -343,7 +354,8 @@ export function ApplicationDetailPage() {
                 {t("applications.submissionSuccess", "Application submitted successfully!")}
               </h3>
               <p className="text-xs text-muted-foreground max-w-md mx-auto">
-                Your application has been forwarded to the department. Tracker Agent is monitoring verification milestones.
+                Your application has been forwarded to the department. Tracker Agent is monitoring
+                verification milestones.
               </p>
             </div>
           ) : (
@@ -365,7 +377,7 @@ export function ApplicationDetailPage() {
                 <span className="text-xs leading-relaxed text-foreground select-none">
                   {t(
                     "applications.consentCheckbox",
-                    "I have reviewed the information above and hereby authorize Sahayak to submit this application to the designated department on my behalf."
+                    "I have reviewed the information above and hereby authorize Sahayak to submit this application to the designated department on my behalf.",
                   )}
                 </span>
               </label>

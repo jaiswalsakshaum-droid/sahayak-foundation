@@ -13,7 +13,7 @@ export function ok<T>(data: T): ServiceResult<T> {
 
 export function err<T = never>(
   error: string,
-  optionsOrCode?: string | { degraded?: boolean; code?: string }
+  optionsOrCode?: string | { degraded?: boolean; code?: string },
 ): ServiceResult<T> {
   if (typeof optionsOrCode === "string") {
     return {
@@ -32,12 +32,14 @@ export function err<T = never>(
   };
 }
 
-export function isOk<T>(result: ServiceResult<T>): result is { ok: true; data: T; degraded?: false } {
+export function isOk<T>(
+  result: ServiceResult<T>,
+): result is { ok: true; data: T; degraded?: false } {
   return result.ok === true;
 }
 
 export function isErr<T>(
-  result: ServiceResult<T>
+  result: ServiceResult<T>,
 ): result is { ok: false; error: string; degraded?: boolean; code?: string } {
   return result.ok === false;
 }

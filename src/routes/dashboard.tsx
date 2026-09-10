@@ -58,13 +58,12 @@ function DashboardPage() {
           const [appsRes, docsRes, eventsRes, notifsRes] = await Promise.all([
             supabase
               .from("applications")
-              .select("id, tracking_id, status, applicant_info, updated_at, created_at, schemes(name)")
+              .select(
+                "id, tracking_id, status, applicant_info, updated_at, created_at, schemes(name)",
+              )
               .eq("citizen_id", userProfile.id)
               .order("updated_at", { ascending: false }),
-            supabase
-              .from("documents")
-              .select("id, status")
-              .eq("citizen_id", userProfile.id),
+            supabase.from("documents").select("id, status").eq("citizen_id", userProfile.id),
             supabase
               .from("agent_events")
               .select("id, agent_name, action, created_at, details, agent_runs!inner(citizen_id)")
@@ -87,7 +86,13 @@ function DashboardPage() {
               const isApproved = a.status === "approved";
               const isActionReq = a.status === "awaiting_approval";
               const tone: Status = isApproved ? "complete" : isActionReq ? "warning" : "active";
-              const progress = isApproved ? 100 : a.status === "under_review" ? 75 : a.status === "submitted" ? 60 : 40;
+              const progress = isApproved
+                ? 100
+                : a.status === "under_review"
+                  ? 75
+                  : a.status === "submitted"
+                    ? 60
+                    : 40;
               const stepLabel =
                 a.status === "approved"
                   ? "Approved & Sanctioned"
@@ -102,7 +107,9 @@ function DashboardPage() {
               return {
                 id: a.tracking_id || a.id,
                 name: schemeName,
-                status: a.status.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase()),
+                status: a.status
+                  .replace(/_/g, " ")
+                  .replace(/\b\w/g, (c: string) => c.toUpperCase()),
                 tone,
                 progress,
                 step: stepLabel,
@@ -122,7 +129,12 @@ function DashboardPage() {
             const mappedActivity = rawEvents.map((e: any) => ({
               agent: e.agent_name || "Citizen Agent",
               text: e.action || "Executed task",
-              time: e.created_at ? new Date(e.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Just now",
+              time: e.created_at
+                ? new Date(e.created_at).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : "Just now",
               tone: (e.agent_name?.toLowerCase().includes("doc") ? "warning" : "active") as Status,
             }));
             setActivityList(mappedActivity);
@@ -132,7 +144,11 @@ function DashboardPage() {
             const mappedNotifs = rawNotifs.map((n: any) => ({
               title: n.title,
               time: n.created_at ? new Date(n.created_at).toLocaleDateString() : "Today",
-              tone: (n.type === "critical" ? "critical" : n.type === "warning" ? "warning" : "active") as Status,
+              tone: (n.type === "critical"
+                ? "critical"
+                : n.type === "warning"
+                  ? "warning"
+                  : "active") as Status,
               unread: !n.is_read,
             }));
             setNotificationsList(mappedNotifs);
@@ -170,14 +186,24 @@ function DashboardPage() {
   ].filter(Boolean);
 
   const subtitleText =
-    subtitleItems.length > 0 ? subtitleItems.join(" · ") : t("dashboard.completeProfile", "Please complete your profile");
+    subtitleItems.length > 0
+      ? subtitleItems.join(" · ")
+      : t("dashboard.completeProfile", "Please complete your profile");
 
   // Dynamic aggregates for logged-in citizen
-  const appsInProgressCount = applicationsList.filter((a) => a.status !== "Approved" && a.status !== "Rejected").length;
-  const actionsRequiredCount = applicationsList.filter((a) => a.tone === "warning" || a.status === "Awaiting Approval").length;
-  const benefitsDiscoveredCount = Math.max(applicationsList.length, applicationsList.length > 0 ? applicationsList.length + 1 : 0);
+  const appsInProgressCount = applicationsList.filter(
+    (a) => a.status !== "Approved" && a.status !== "Rejected",
+  ).length;
+  const actionsRequiredCount = applicationsList.filter(
+    (a) => a.tone === "warning" || a.status === "Awaiting Approval",
+  ).length;
+  const benefitsDiscoveredCount = Math.max(
+    applicationsList.length,
+    applicationsList.length > 0 ? applicationsList.length + 1 : 0,
+  );
   const docRatio = docsTotalCount > 0 ? `${docsVerifiedCount}/${docsTotalCount}` : "0/0";
-  const docProgress = docsTotalCount > 0 ? Math.round((docsVerifiedCount / docsTotalCount) * 100) : 0;
+  const docProgress =
+    docsTotalCount > 0 ? Math.round((docsVerifiedCount / docsTotalCount) * 100) : 0;
 
   return (
     <AppShell>
@@ -190,9 +216,7 @@ function DashboardPage() {
           <h1 className="mt-2 font-display text-3xl font-semibold tracking-tight">
             {greetingText}
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {subtitleText}
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">{subtitleText}</p>
         </div>
 
         <ProgressStepper />
@@ -206,7 +230,11 @@ function DashboardPage() {
           <MetricCard
             label={t("dashboard.metrics.appsInProgress", "Applications in progress")}
             value={`${appsInProgressCount}`}
-            detail={actionsRequiredCount > 0 ? `${actionsRequiredCount} ${t("dashboard.metrics.needsAction", "needs action")}` : t("dashboard.metrics.allGood", "All up to date")}
+            detail={
+              actionsRequiredCount > 0
+                ? `${actionsRequiredCount} ${t("dashboard.metrics.needsAction", "needs action")}`
+                : t("dashboard.metrics.allGood", "All up to date")
+            }
             tone={actionsRequiredCount > 0 ? "warning" : "brand"}
           />
           <MetricCard
@@ -219,7 +247,11 @@ function DashboardPage() {
           <MetricCard
             label={t("dashboard.metrics.actionsRequired", "Actions required")}
             value={`${actionsRequiredCount}`}
-            detail={actionsRequiredCount > 0 ? t("dashboard.metrics.dueSoon", "Action needed") : t("dashboard.metrics.allGood", "All up to date")}
+            detail={
+              actionsRequiredCount > 0
+                ? t("dashboard.metrics.dueSoon", "Action needed")
+                : t("dashboard.metrics.allGood", "All up to date")
+            }
             tone={actionsRequiredCount > 0 ? "critical" : "brand"}
           />
         </div>
@@ -242,7 +274,10 @@ function DashboardPage() {
               {applicationsList.length === 0 ? (
                 <EmptyState
                   title={t("dashboard.emptyAppsTitle", "No active applications yet")}
-                  description={t("dashboard.emptyAppsDesc", "Talk with Sahayak AI Assistant to discover matching schemes and start your first application.")}
+                  description={t(
+                    "dashboard.emptyAppsDesc",
+                    "Talk with Sahayak AI Assistant to discover matching schemes and start your first application.",
+                  )}
                   action={
                     <Button asChild size="sm">
                       <Link to="/assistant">
@@ -271,8 +306,15 @@ function DashboardPage() {
               <SectionHeading title={t("dashboard.recentActivity", "Recent AI activity")} />
               {activityList.length === 0 ? (
                 <div className="rounded-xl border border-line bg-card p-6 text-center text-sm text-muted-foreground">
-                  <p className="font-semibold text-foreground mb-1">{t("dashboard.emptyActivityTitle", "No activity yet")}</p>
-                  <p className="text-xs">{t("dashboard.emptyActivityDesc", "Your AI workforce activity will appear here once you interact with the assistant.")}</p>
+                  <p className="font-semibold text-foreground mb-1">
+                    {t("dashboard.emptyActivityTitle", "No activity yet")}
+                  </p>
+                  <p className="text-xs">
+                    {t(
+                      "dashboard.emptyActivityDesc",
+                      "Your AI workforce activity will appear here once you interact with the assistant.",
+                    )}
+                  </p>
                 </div>
               ) : (
                 <ActivityList items={activityList} />
@@ -290,7 +332,10 @@ function DashboardPage() {
               <div className="rounded-xl border border-line bg-card p-4 shadow-none">
                 {notificationsList.length === 0 ? (
                   <p className="text-xs text-muted-foreground text-center py-3">
-                    {t("dashboard.emptyNotifications", "You are all caught up. No new notifications.")}
+                    {t(
+                      "dashboard.emptyNotifications",
+                      "You are all caught up. No new notifications.",
+                    )}
                   </p>
                 ) : (
                   notificationsList.map((notification, idx) => (
@@ -303,7 +348,12 @@ function DashboardPage() {
         </div>
 
         <div className="rounded-xl border border-line bg-card p-4 text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">{t("dashboard.connectedEcosystem", "Your connected ecosystem: Sahayak works alongside myScheme, UMANG and DigiLocker — it never replaces them.")}</span>
+          <span className="font-medium text-foreground">
+            {t(
+              "dashboard.connectedEcosystem",
+              "Your connected ecosystem: Sahayak works alongside myScheme, UMANG and DigiLocker — it never replaces them.",
+            )}
+          </span>
           <Button asChild variant="link" size="sm" className="ml-1 px-1 text-brand">
             <Link to="/profile">
               {t("dashboard.manageConnections", "Manage connections")} <ChevronRight />

@@ -74,16 +74,16 @@ function ApplicationsPage() {
                 row.status === "draft"
                   ? "Awaiting your approval"
                   : row.status === "pending_citizen_approval"
-                  ? "Awaiting your approval"
-                  : row.status === "pending_admin_review"
-                  ? "Under Department Review"
-                  : row.status === "submitted"
-                  ? "Submitted to Portal"
-                  : row.status === "approved"
-                  ? "Approved & Disbursed"
-                  : row.status === "rejected"
-                  ? "Action Required / Rejected"
-                  : row.status,
+                    ? "Awaiting your approval"
+                    : row.status === "pending_admin_review"
+                      ? "Under Department Review"
+                      : row.status === "submitted"
+                        ? "Submitted to Portal"
+                        : row.status === "approved"
+                          ? "Approved & Disbursed"
+                          : row.status === "rejected"
+                            ? "Action Required / Rejected"
+                            : row.status,
               date: row.created_at ? new Date(row.created_at).toLocaleDateString() : "Today",
               actionReady: isAwaitingApproval,
             };

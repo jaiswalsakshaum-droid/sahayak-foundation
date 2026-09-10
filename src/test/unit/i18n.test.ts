@@ -18,11 +18,21 @@ describe("i18n Multi-Language Support", () => {
   });
 
   it("ensures every language contains essential top-level translation keys", () => {
-    const essentialKeys = ["nav", "languages", "dashboard", "assistant", "documents", "applications", "auth"];
+    const essentialKeys = [
+      "nav",
+      "languages",
+      "dashboard",
+      "assistant",
+      "documents",
+      "applications",
+      "auth",
+    ];
 
     for (const [lang, bundle] of Object.entries(bundles)) {
       for (const key of essentialKeys) {
-        expect(bundle, `Language '${lang}' should contain top-level key '${key}'`).toHaveProperty(key);
+        expect(bundle, `Language '${lang}' should contain top-level key '${key}'`).toHaveProperty(
+          key,
+        );
       }
     }
   });
