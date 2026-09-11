@@ -24,7 +24,7 @@ describe("Auth Helper Functions", () => {
     // Dynamically test the live auth code path
     const signInSpy = vi.spyOn(supabase.auth, "signInWithPassword").mockResolvedValueOnce({
       data: { user: null, session: null },
-      error: { message: "Invalid login credentials", name: "AuthApiError", status: 400 },
+      error: { message: "Invalid login credentials", name: "AuthApiError", status: 400 } as any,
     });
 
     // Mock module state for isSupabaseConfigured
