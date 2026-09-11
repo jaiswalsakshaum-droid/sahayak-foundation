@@ -324,10 +324,26 @@ function DemoPage() {
             <span className="font-display font-semibold hidden sm:block">Sahayak</span>
           </Link>
           <div className="text-sm font-medium ml-4 border-l border-line pl-4 text-muted-foreground">
-            Interactive Demo
+            Interactive Walkthrough
           </div>
         </div>
       </header>
+
+      {/* Scripted Walkthrough Disclosure Banner */}
+      <div className="bg-amber-500/10 border-b border-amber-500/20 text-amber-900 px-4 py-2.5 text-xs sm:text-sm font-medium">
+        <div className="mx-auto flex w-full max-w-7xl items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex size-2 rounded-full bg-amber-500 animate-pulse" />
+            <span>You're viewing a scripted product walkthrough.</span>
+          </div>
+          <Link
+            to="/assistant"
+            className="font-semibold text-brand hover:underline inline-flex items-center gap-1 shrink-0 ml-4"
+          >
+            Try the real assistant <ArrowRight className="size-3.5" />
+          </Link>
+        </div>
+      </div>
 
       <main className="flex-1 w-full max-w-7xl px-5 py-8 mx-auto grid grid-cols-1 xl:grid-cols-12 gap-8">
         {/* Header / Intro */}

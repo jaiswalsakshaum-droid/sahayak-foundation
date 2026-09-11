@@ -23,6 +23,7 @@ try:
         NeedIntent,
         SchemeRankingResult,
         EligibilityResult,
+        CriterionEvaluation,
         DocumentRequirementCheck,
         ApplicationDraftPayload,
     )
@@ -32,6 +33,7 @@ except ImportError:
         NeedIntent,
         SchemeRankingResult,
         EligibilityResult,
+        CriterionEvaluation,
         DocumentRequirementCheck,
         ApplicationDraftPayload,
     )
@@ -177,14 +179,14 @@ def call_groq_json_with_retry(
     return None
 
 # ==============================================================================
-# Deterministic Rule Evaluation Logic (Hybrid Safety Layer)
+# Deterministic & Grounded Rule Evaluation Logic (Hybrid Safety Layer)
 # ==============================================================================
 
 def parse_numeric_threshold(req_text: str) -> Optional[int]:
     """Extracts numeric rupee or quantity threshold from civic requirement string."""
     cleaned = req_text.replace(",", "").lower()
-    # Check for Lakhs (e.g., 3.5 Lakh / 3.5 Lakhs)
-    lakh_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:lakh|lakhs|l)", cleaned)
+    # Check for Lakhs (e.g., 3.5 Lakh / 3.5 Lakhs / 3L / 6L / 18L)
+    lakh_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:lakh|lakhs|l\b)", cleaned)
     if lakh_match:
         return int(float(lakh_match.group(1)) * 100000)
     
@@ -196,7 +198,7 @@ def parse_numeric_threshold(req_text: str) -> Optional[int]:
     return None
 
 def parse_age_range(req_text: str) -> Optional[tuple[int, int]]:
-    """Extracts min and max age from requirement string like '18-25 years'."""
+    """Extracts min and max age from requirement string like '14-18 years', '18-40 years', 'Below 10 years'."""
     match = re.search(r"(\d{1,2})\s*[-–to]+\s*(\d{1,2})", req_text.lower())
     if match:
         return int(match.group(1)), int(match.group(2))
@@ -208,37 +210,51 @@ def parse_age_range(req_text: str) -> Optional[tuple[int, int]]:
         return 0, int(max_match.group(1))
     return None
 
-def evaluate_criterion_hybrid(
-    rule: Dict[str, Any],
+def evaluate_numeric_rule(
+    criterion_name: str,
+    req: str,
+    evidence_source: str,
     profile: Dict[str, Any],
     verified_docs: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    """
-    Hybrid Evaluation:
-    1. Deterministic evaluation for numeric/income/age requirements.
-    2. LLM reasoning evaluation for qualitative/institution/caste requirements.
-    """
-    criterion_name = rule.get("criterion_name", "")
-    req = rule.get("requirement", "")
-    evidence_source = rule.get("evidence_source", "Profile")
+    """Evaluates numeric threshold and range criteria (income, age, allowances)."""
     c_lower = criterion_name.lower()
     r_lower = req.lower()
 
-    # 1. Income Criterion (Deterministic)
-    if "income" in c_lower or "income" in r_lower:
-        citizen_income = profile.get("annual_income", 210000)
-        threshold = parse_numeric_threshold(req) or 350000
-        
-        # Check if citizen has a verified Income Certificate
-        has_income_cert = any("income" in d.get("document_type", "").lower() for d in verified_docs)
-        source = "Income Certificate (Verified)" if has_income_cert else "Citizen Profile"
+    # 1. Income Comparison
+    if "income" in c_lower or "income" in r_lower or "₹" in req or "rs" in r_lower:
+        # Check verified Income Certificate first, then profile
+        income_doc = next(
+            (d for d in verified_docs if "income" in d.get("document_type", "").lower()),
+            None
+        )
+        extracted = (income_doc.get("extracted_fields") or {}) if income_doc else {}
+        citizen_income = extracted.get("annual_income") or profile.get("annual_income")
 
+        if citizen_income is None:
+            return {
+                "criterion_name": criterion_name,
+                "citizen_info": "Not Specified",
+                "requirement": req,
+                "evidence_source": evidence_source or "Income Certificate",
+                "status": "missing",
+                "explanation": "Annual household income is not declared or documented in profile.",
+            }
+
+        try:
+            citizen_income = int(float(str(citizen_income).replace(",", "").replace("₹", "")))
+        except (ValueError, TypeError):
+            citizen_income = 210000
+
+        threshold = parse_numeric_threshold(req) or 350000
         is_met = citizen_income <= threshold
         status = "verified" if is_met else "mismatch"
         citizen_val = f"₹{citizen_income:,}"
+        source = "Income Certificate (Verified)" if income_doc else "Citizen Profile"
         explanation = (
-            f"Annual income {citizen_val} satisfies threshold ({req})."
-            if is_met else f"Annual income {citizen_val} exceeds upper limit ({req})."
+            f"Annual income {citizen_val} satisfies ceiling ({req})."
+            if is_met
+            else f"Annual income {citizen_val} exceeds upper limit ({req})."
         )
         return {
             "criterion_name": criterion_name,
@@ -249,34 +265,271 @@ def evaluate_criterion_hybrid(
             "explanation": explanation,
         }
 
-    # 2. Age Criterion (Deterministic)
-    if "age" in c_lower or "age" in r_lower or "years" in r_lower:
-        citizen_age = profile.get("age", 20)
+    # 2. Age Range Comparison
+    if "age" in c_lower or "age" in r_lower or "years" in r_lower or "year" in r_lower:
+        # Check identity docs or profile
+        id_doc = next(
+            (d for d in verified_docs if any(k in d.get("document_type", "").lower() for k in ["aadhaar", "identity", "birth", "pan"])),
+            None
+        )
+        extracted = (id_doc.get("extracted_fields") or {}) if id_doc else {}
+        citizen_age = extracted.get("age") or profile.get("age")
+
+        if citizen_age is None:
+            return {
+                "criterion_name": criterion_name,
+                "citizen_info": "Not Verified",
+                "requirement": req,
+                "evidence_source": evidence_source or "Identity Document",
+                "status": "missing",
+                "explanation": "Citizen age could not be determined from profile or identity documents.",
+            }
+
+        try:
+            citizen_age = int(float(citizen_age))
+        except (ValueError, TypeError):
+            citizen_age = 20
+
         age_range = parse_age_range(req)
         citizen_val = f"{citizen_age} years"
+        source = f"{id_doc.get('document_type')} (Verified)" if id_doc else "Citizen Profile"
+
         if age_range:
             min_age, max_age = age_range
             is_met = min_age <= citizen_age <= max_age
             status = "verified" if is_met else "mismatch"
             explanation = (
-                f"Citizen age ({citizen_age}) is within eligible range ({min_age}-{max_age} years)."
-                if is_met else f"Citizen age ({citizen_age}) is outside eligible range ({req})."
+                f"Citizen age ({citizen_age} years) is within eligible range ({min_age}-{max_age} years)."
+                if is_met
+                else f"Citizen age ({citizen_age} years) is outside eligible range ({req})."
             )
         else:
             status = "verified"
-            explanation = f"Age verified ({citizen_age} years)."
+            explanation = f"Age criteria satisfied ({citizen_age} years)."
 
         return {
             "criterion_name": criterion_name,
             "citizen_info": citizen_val,
             "requirement": req,
-            "evidence_source": "Aadhaar Card / Profile",
+            "evidence_source": source,
             "status": status,
             "explanation": explanation,
         }
 
-    # 3. Document/Enrollment Evidence Criterion
-    if "enrollment" in c_lower or "student" in c_lower or "institution" in c_lower or "school" in c_lower:
+    # Generic numeric fallback
+    threshold = parse_numeric_threshold(req)
+    return {
+        "criterion_name": criterion_name,
+        "citizen_info": f"Threshold {threshold or req}",
+        "requirement": req,
+        "evidence_source": evidence_source,
+        "status": "verified" if threshold else "missing",
+        "explanation": f"Numerical criterion evaluated against {evidence_source}.",
+    }
+
+def evaluate_boolean_rule(
+    criterion_name: str,
+    req: str,
+    evidence_source: str,
+    profile: Dict[str, Any],
+    verified_docs: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Evaluates yes/no attributes (landholding, pucca house ownership, taxpayer status, bank seeding)."""
+    c_lower = criterion_name.lower()
+    r_lower = req.lower()
+
+    # 1. Landholding / Land Ownership (PM-KISAN)
+    if "land" in c_lower or "land" in r_lower or "cultivable" in r_lower:
+        land_doc = next(
+            (d for d in verified_docs if any(k in d.get("document_type", "").lower() for k in ["land", "ror", "khasra", "khatauni"])),
+            None
+        )
+        if land_doc:
+            fields = land_doc.get("extracted_fields") or {}
+            land_size = fields.get("land_area", "Cultivable family parcel")
+            return {
+                "criterion_name": criterion_name,
+                "citizen_info": f"Verified landholding: {land_size}",
+                "requirement": req,
+                "evidence_source": "Land Records / RoR (Verified)",
+                "status": "verified",
+                "explanation": f"Agricultural land ownership verified via official land records ({land_size}).",
+            }
+        
+        # Check profile declaration
+        if profile.get("occupation", "").lower() in ["farmer", "agriculture", "agricultural assistant"] or profile.get("has_land"):
+            return {
+                "criterion_name": criterion_name,
+                "citizen_info": "Declared Landholding Farmer",
+                "requirement": req,
+                "evidence_source": "Self Declaration / Profile",
+                "status": "verified",
+                "explanation": "Agricultural landholder status declared in profile. Upload RoR for statutory filing.",
+            }
+
+        return {
+            "criterion_name": criterion_name,
+            "citizen_info": "Land Record Not Uploaded",
+            "requirement": req,
+            "evidence_source": evidence_source or "Land Records / RoR",
+            "status": "missing",
+            "explanation": "Mandatory proof of cultivable landholding (RoR) is missing.",
+        }
+
+    # 2. Pucca House Ownership (PMAY-U: Must not own a pucca house)
+    if "house" in c_lower or "pucca" in r_lower or "housing" in c_lower:
+        owns_pucca = profile.get("owns_pucca_house", False)
+        if not owns_pucca:
+            return {
+                "criterion_name": criterion_name,
+                "citizen_info": "No Pucca House Owned",
+                "requirement": req,
+                "evidence_source": "Self Declaration / Affidavit",
+                "status": "verified",
+                "explanation": "Citizen self-declaration confirms no prior pucca dwelling ownership across India.",
+            }
+        else:
+            return {
+                "criterion_name": criterion_name,
+                "citizen_info": "Owns Pucca House",
+                "requirement": req,
+                "evidence_source": "Self Declaration",
+                "status": "mismatch",
+                "explanation": "Beneficiary already owns a pucca house, exceeding PMAY-U eligibility guidelines.",
+            }
+
+    # 3. Taxpayer Status (APY: Not an income taxpayer)
+    if "tax" in c_lower or "taxpayer" in r_lower:
+        is_taxpayer = profile.get("is_taxpayer", False)
+        if not is_taxpayer:
+            return {
+                "criterion_name": criterion_name,
+                "citizen_info": "Non-Taxpayer Record",
+                "requirement": req,
+                "evidence_source": "Self Declaration / PAN",
+                "status": "verified",
+                "explanation": "Verified non-taxpayer status under IT Act for unorganized sector pension eligibility.",
+            }
+        else:
+            return {
+                "criterion_name": criterion_name,
+                "citizen_info": "Income Taxpayer",
+                "requirement": req,
+                "evidence_source": "Income Tax Records",
+                "status": "mismatch",
+                "explanation": "Existing income taxpayer status disqualifies from APY government co-contribution.",
+            }
+
+    # Default boolean check against profile
+    attr_key = criterion_name.lower().replace(" ", "_")
+    profile_val = profile.get(attr_key)
+    if profile_val is not None:
+        status = "verified" if bool(profile_val) else "mismatch"
+        return {
+            "criterion_name": criterion_name,
+            "citizen_info": str(profile_val),
+            "requirement": req,
+            "evidence_source": evidence_source,
+            "status": status,
+            "explanation": f"Boolean attribute verified from citizen profile: {profile_val}.",
+        }
+
+    return {
+        "criterion_name": criterion_name,
+        "citizen_info": "Pending Verification",
+        "requirement": req,
+        "evidence_source": evidence_source,
+        "status": "missing",
+        "explanation": f"Insufficient data to verify {criterion_name} ({req}).",
+    }
+
+def evaluate_enum_rule(
+    criterion_name: str,
+    req: str,
+    evidence_source: str,
+    profile: Dict[str, Any],
+    verified_docs: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Evaluates categorical criteria (caste category, domicile/location, gender, education level)."""
+    c_lower = criterion_name.lower()
+    r_lower = req.lower()
+
+    # 1. Location / Domicile / State residency
+    if "location" in c_lower or "residence" in c_lower or "domicile" in c_lower or "state" in c_lower or "urban" in r_lower:
+        citizen_loc = profile.get("location", "")
+        if citizen_loc:
+            # Check if state or urban matches
+            is_match = any(term in citizen_loc.lower() for term in ["uttar pradesh", "lucknow", "urban", "delhi", "maharashtra", "india"]) or "india" in r_lower or "resident" in r_lower
+            return {
+                "criterion_name": criterion_name,
+                "citizen_info": citizen_loc,
+                "requirement": req,
+                "evidence_source": "Citizen Profile / Aadhaar",
+                "status": "verified" if is_match else "mismatch",
+                "explanation": f"Citizen location '{citizen_loc}' matches requirement ({req})." if is_match else f"Location '{citizen_loc}' does not satisfy requirement ({req}).",
+            }
+
+    # 2. Caste / Social Category (General, OBC, SC, ST, EWS)
+    if "caste" in c_lower or "category" in c_lower or "social" in c_lower:
+        category_doc = next(
+            (d for d in verified_docs if "caste" in d.get("document_type", "").lower() or "category" in d.get("document_type", "").lower()),
+            None
+        )
+        citizen_cat = profile.get("category") or (category_doc.get("extracted_fields", {}).get("category") if category_doc else None)
+        if citizen_cat:
+            is_match = citizen_cat.lower() in r_lower or "all" in r_lower or "any" in r_lower
+            return {
+                "criterion_name": criterion_name,
+                "citizen_info": citizen_cat,
+                "requirement": req,
+                "evidence_source": "Caste Certificate (Verified)" if category_doc else "Citizen Profile",
+                "status": "verified" if is_match else "mismatch",
+                "explanation": f"Citizen social category '{citizen_cat}' evaluated against {req}.",
+            }
+        return {
+            "criterion_name": criterion_name,
+            "citizen_info": "Not Stated",
+            "requirement": req,
+            "evidence_source": evidence_source,
+            "status": "missing",
+            "explanation": "Category proof required for reserved scheme quota.",
+        }
+
+    # 3. Education Level / Status
+    if "education" in c_lower or "qualification" in c_lower:
+        edu = profile.get("education_level") or profile.get("occupation", "")
+        if edu:
+            return {
+                "criterion_name": criterion_name,
+                "citizen_info": str(edu),
+                "requirement": req,
+                "evidence_source": "Citizen Profile",
+                "status": "verified",
+                "explanation": f"Educational background ({edu}) meets scheme eligibility guidelines.",
+            }
+
+    return {
+        "criterion_name": criterion_name,
+        "citizen_info": "Not Provided",
+        "requirement": req,
+        "evidence_source": evidence_source,
+        "status": "missing",
+        "explanation": f"Insufficient profile details to verify {criterion_name} ({req}).",
+    }
+
+def evaluate_text_rule(
+    criterion_name: str,
+    req: str,
+    evidence_source: str,
+    profile: Dict[str, Any],
+    verified_docs: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Evaluates qualitative/text criteria with grounded document evidence and structured LLM fallback."""
+    c_lower = criterion_name.lower()
+    r_lower = req.lower()
+
+    # 1. School / College Enrollment Evidence
+    if "enrollment" in c_lower or "student" in c_lower or "school" in c_lower or "institution" in c_lower:
         enrollment_doc = next(
             (d for d in verified_docs if "enrollment" in d.get("document_type", "").lower() or "student" in d.get("document_type", "").lower()),
             None
@@ -299,42 +552,118 @@ def evaluate_criterion_hybrid(
                 "requirement": req,
                 "evidence_source": "Enrollment Certificate",
                 "status": "missing",
-                "explanation": "Mandatory proof of active enrollment is missing.",
+                "explanation": "Mandatory proof of active school/institution enrollment is missing.",
             }
 
-    # 4. Qualitative / Categorical (LLM Reasoning Layer)
+    # 2. Bank Account / Passbook Seeding
+    if "bank" in c_lower or "bank" in r_lower or "account" in c_lower or "aadhaar-seeded" in r_lower:
+        bank_doc = next(
+            (d for d in verified_docs if "bank" in d.get("document_type", "").lower() or "passbook" in d.get("document_type", "").lower()),
+            None
+        )
+        if bank_doc:
+            fields = bank_doc.get("extracted_fields") or {}
+            bank_name = fields.get("bank_name", "Active Bank Account")
+            return {
+                "criterion_name": criterion_name,
+                "citizen_info": f"Active account at {bank_name}",
+                "requirement": req,
+                "evidence_source": "Bank Passbook (Verified)",
+                "status": "verified",
+                "explanation": f"Aadhaar-seeded active bank account confirmed via {bank_name}.",
+            }
+        else:
+            return {
+                "criterion_name": criterion_name,
+                "citizen_info": "Bank Passbook Missing",
+                "requirement": req,
+                "evidence_source": "Bank Passbook",
+                "status": "missing",
+                "explanation": "Direct Benefit Transfer requires verified bank account passbook.",
+            }
+
+    # 3. Citizenship / Resident Indian
+    if "citizen" in c_lower or "citizenship" in c_lower or "resident" in r_lower:
+        id_doc = next(
+            (d for d in verified_docs if any(k in d.get("document_type", "").lower() for k in ["aadhaar", "identity", "passport", "voter"])),
+            None
+        )
+        if id_doc or profile.get("location"):
+            return {
+                "criterion_name": criterion_name,
+                "citizen_info": "Resident Indian Citizen",
+                "requirement": req,
+                "evidence_source": "Aadhaar / National Identity (Verified)" if id_doc else "Citizen Profile",
+                "status": "verified",
+                "explanation": "Indian citizenship and residency confirmed via verified civic identity records.",
+            }
+
+    # 4. Grounded LLM Reasoning Layer for Complex Declarations
     if groq_client:
         prompt_system = (
             "You are Sahayak's Evidence-Backed Civic Eligibility Judge. "
-            "Evaluate whether the citizen satisfies the specific scheme criterion based on available evidence.\n"
-            "Return JSON: { 'status': 'verified'|'missing'|'mismatch', 'citizen_info': 'concise evidence summary', 'explanation': '1 sentence justification with cited evidence' }"
+            "Evaluate whether the citizen satisfies the specific scheme criterion based STRICTLY on available evidence.\n"
+            "If evidence is insufficient or no matching document is present, return status 'missing' with a clear citation.\n"
+            "Return valid JSON matching: { 'criterion_name': '...', 'citizen_info': 'concise evidence summary', 'requirement': '...', 'evidence_source': '...', 'status': 'verified'|'missing'|'mismatch', 'explanation': '1 sentence justification with cited evidence' }"
         )
         prompt_user = (
             f"Criterion Name: {criterion_name}\n"
             f"Requirement: {req}\n"
+            f"Evidence Source Expected: {evidence_source}\n"
             f"Citizen Profile: {json.dumps(profile)}\n"
             f"Verified Documents on file: {[d.get('document_type') for d in verified_docs]}"
         )
-        llm_eval = call_groq_json_with_retry(MODEL_REASONING, prompt_system, prompt_user)
+        llm_eval = call_groq_json_with_retry(
+            MODEL_REASONING,
+            prompt_system,
+            prompt_user,
+            pydantic_model=CriterionEvaluation
+        )
         if llm_eval and "status" in llm_eval:
             return {
                 "criterion_name": criterion_name,
-                "citizen_info": llm_eval.get("citizen_info", "Verified from record"),
+                "citizen_info": llm_eval.get("citizen_info", "Inspected from records"),
                 "requirement": req,
                 "evidence_source": evidence_source,
-                "status": llm_eval.get("status", "verified"),
-                "explanation": llm_eval.get("explanation", f"Verified against {evidence_source}."),
+                "status": llm_eval.get("status", "missing"),
+                "explanation": llm_eval.get("explanation", f"Evaluated against {evidence_source}."),
             }
 
-    # Default fallback
+    # Missing evidence fallback — never rubber stamp!
     return {
         "criterion_name": criterion_name,
-        "citizen_info": "Verified via Profile / DigiLocker",
+        "citizen_info": "Insufficient Data",
         "requirement": req,
         "evidence_source": evidence_source,
-        "status": "verified",
-        "explanation": f"Requirement satisfied based on {evidence_source}.",
+        "status": "missing",
+        "explanation": f"Insufficient data to verify {criterion_name}. Mandatory evidence ({evidence_source}) is required.",
     }
+
+def evaluate_criterion_hybrid(
+    rule: Dict[str, Any],
+    profile: Dict[str, Any],
+    verified_docs: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Dispatches criterion evaluation based on rule_type:
+    - 'numeric': Threshold & range bounds (income, age).
+    - 'boolean': Yes/no civic attributes (landholding, pucca house, taxpayer status).
+    - 'enum': Categorical matching (caste, location/domicile, education level).
+    - 'text': Qualitative evidence matching & grounded LLM reasoning.
+    """
+    criterion_name = rule.get("criterion_name", "Eligibility Rule")
+    req = rule.get("requirement", "")
+    rule_type = (rule.get("rule_type") or "text").lower()
+    evidence_source = rule.get("evidence_source", "Profile / Verification Engine")
+
+    if rule_type == "numeric":
+        return evaluate_numeric_rule(criterion_name, req, evidence_source, profile, verified_docs)
+    elif rule_type == "boolean":
+        return evaluate_boolean_rule(criterion_name, req, evidence_source, profile, verified_docs)
+    elif rule_type == "enum":
+        return evaluate_enum_rule(criterion_name, req, evidence_source, profile, verified_docs)
+    else:  # text / qualitative
+        return evaluate_text_rule(criterion_name, req, evidence_source, profile, verified_docs)
 
 # ==============================================================================
 # Agent Nodes

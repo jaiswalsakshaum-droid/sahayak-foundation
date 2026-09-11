@@ -22,28 +22,39 @@ export const Route = createFileRoute("/login")({
   component: LoginPage,
 });
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 function LoginPage() {
   const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const navigate = useNavigate();
 
+  const isEmailValid = EMAIL_REGEX.test(email.trim());
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+
+    if (!isEmailValid && email.trim() !== "admin") {
+      setError("Please enter a valid email address.");
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      const res = await signIn(email, password);
+      const res = await signIn(email.trim(), password);
       setIsLoading(false);
       if (res.success) {
         setIsSuccess(true);
         setTimeout(() => navigate({ to: "/dashboard" }), 600);
       } else {
-        setError(res.error || "Invalid credentials. Try 4321 / 1234");
+        setError(res.error || "Invalid credentials. Please check your email and password.");
       }
     } catch (err: any) {
       setIsLoading(false);
@@ -75,31 +86,52 @@ function LoginPage() {
         <CardContent>
           <form className="space-y-4" onSubmit={handleLogin}>
             <label className="block text-sm font-medium">
-              {t("auth.phoneLabel", "Mobile number or email")}
+              {t("auth.emailLabel", "Email address")}
               <Input
-                className="mt-2 bg-card"
-                placeholder="4321"
+                className="mt-1.5 bg-card"
+                type="email"
+                placeholder="youremail@gmail.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={isLoading || isSuccess}
-              />
-            </label>
-            <label className="block text-sm font-medium">
-              {t("auth.passwordLabel", "Password")}
-              <Input
-                className="mt-2 bg-card"
-                type="password"
-                placeholder="1234"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                disabled={isLoading || isSuccess}
+                required
               />
             </label>
 
+            <label className="block text-sm font-medium">
+              <div className="flex items-center justify-between">
+                <span>{t("auth.passwordLabel", "Password")}</span>
+                <Link
+                  to="/reset-password"
+                  className="text-xs font-normal text-brand hover:underline"
+                >
+                  {t("auth.forgotPassword", "Forgot password?")}
+                </Link>
+              </div>
+              <div className="relative mt-1.5">
+                <Input
+                  className="bg-card pr-10"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  disabled={isLoading || isSuccess}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-2.5 text-muted-foreground hover:text-foreground"
+                >
+                  {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
+            </label>
+
             {error && (
-              <div className="flex items-center gap-2 text-sm text-amber-700 bg-amber-100 p-2 rounded border border-amber-200">
-                <AlertCircle className="size-4" />
-                {error}
+              <div className="flex items-center gap-2 text-sm text-amber-700 bg-amber-100 p-2.5 rounded border border-amber-200">
+                <AlertCircle className="size-4 shrink-0" />
+                <span>{error}</span>
               </div>
             )}
 

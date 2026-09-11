@@ -1,5 +1,6 @@
-import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Search,
@@ -10,15 +11,21 @@ import {
   ExternalLink,
   Bot,
   AlertTriangle,
+  Loader2,
+  RefreshCw,
+  FileCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { MOCK_SCHEMES_DATA } from "@/lib/admin-services";
-
-import { requireAuth } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth";
+import {
+  getAdminSchemes,
+  updateAdminSchemeStatus,
+  type AdminSchemeDetail,
+} from "@/lib/admin-services";
 
 export const Route = createFileRoute("/admin/schemes")({
   beforeLoad: async () => {
-    await requireAuth();
+    await requireAdmin();
   },
   component: AdminSchemesPage,
 });
@@ -28,16 +35,51 @@ const FILTERS = [
   "State",
   "Education",
   "Agriculture",
-  "Employment",
-  "Women",
+  "Employment & Pension",
+  "Women & Child",
   "Health",
   "Housing",
 ];
 
 function AdminSchemesPage() {
+  const queryClient = useQueryClient();
   const [activeFilters, setActiveFilters] = useState<string[]>([]);
   const [search, setSearch] = useState("");
-  const [selectedScheme, setSelectedScheme] = useState<(typeof MOCK_SCHEMES_DATA)[0] | null>(null);
+  const [selectedScheme, setSelectedScheme] = useState<AdminSchemeDetail | null>(null);
+
+  const {
+    data: schemes = [],
+    isLoading,
+    isRefetching,
+    refetch,
+  } = useQuery({
+    queryKey: ["admin", "schemes"],
+    queryFn: getAdminSchemes,
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({
+      id,
+      status,
+    }: {
+      id: string;
+      status: "Active" | "Draft" | "Archived";
+    }) => {
+      const res = await updateAdminSchemeStatus(id, status);
+      if (!res.ok) throw new Error(res.error);
+      return { id, status };
+    },
+    onSuccess: (data) => {
+      toast.success(`Scheme status updated to ${data.status}`);
+      queryClient.invalidateQueries({ queryKey: ["admin", "schemes"] });
+      if (selectedScheme && selectedScheme.id === data.id) {
+        setSelectedScheme((prev) => (prev ? { ...prev, eligibility_status: data.status, status: data.status } : null));
+      }
+    },
+    onError: (err: any) => {
+      toast.error(err.message || "Failed to update scheme status");
+    },
+  });
 
   const toggleFilter = (filter: string) => {
     setActiveFilters((prev) =>
@@ -45,8 +87,10 @@ function AdminSchemesPage() {
     );
   };
 
-  const filteredSchemes = MOCK_SCHEMES_DATA.filter((scheme) => {
-    const matchesSearch = scheme.name.toLowerCase().includes(search.toLowerCase());
+  const filteredSchemes = schemes.filter((scheme) => {
+    const matchesSearch =
+      scheme.name.toLowerCase().includes(search.toLowerCase()) ||
+      scheme.category.toLowerCase().includes(search.toLowerCase());
     const matchesFilters =
       activeFilters.length === 0 ||
       activeFilters.some((f) => scheme.jurisdiction === f || scheme.category === f);
@@ -70,7 +114,7 @@ function AdminSchemesPage() {
             <Link to="/admin/agents" className="text-muted-foreground hover:text-foreground">
               AI Workforce
             </Link>
-            <Link to="/admin/schemes" className="text-foreground">
+            <Link to="/admin/schemes" className="text-foreground font-semibold">
               Knowledge Base
             </Link>
           </nav>
@@ -82,12 +126,24 @@ function AdminSchemesPage() {
           <div>
             <h1 className="text-3xl font-display font-semibold mb-2">Scheme Knowledge Base</h1>
             <p className="text-muted-foreground">
-              Manage the structured government schemes dataset used by Sahayak.
+              Structured government schemes dataset verified and used by the Sahayak AI workforce.
             </p>
           </div>
-          <Button onClick={() => toast("Scheme addition is disabled in demo mode.")}>
-            Add Scheme
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              disabled={isRefetching}
+              className="gap-2"
+            >
+              <RefreshCw className={`size-4 ${isRefetching ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+            <Button onClick={() => toast.info("To register new schemes, publish through the Supabase schemes catalog.")}>
+              Add Scheme
+            </Button>
+          </div>
         </div>
 
         <div className="bg-card rounded-xl border border-line shadow-sm overflow-hidden">
@@ -97,7 +153,7 @@ function AdminSchemesPage() {
               <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
               <input
                 type="text"
-                placeholder="Search schemes..."
+                placeholder="Search schemes by name or category..."
                 className="w-full pl-9 pr-4 py-2 bg-card border border-line rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -119,67 +175,85 @@ function AdminSchemesPage() {
 
           {/* Table */}
           <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-ice-2 text-muted-foreground text-xs uppercase tracking-wider">
-                <tr>
-                  <th className="px-6 py-4 font-medium">Scheme</th>
-                  <th className="px-6 py-4 font-medium">Category</th>
-                  <th className="px-6 py-4 font-medium">Jurisdiction</th>
-                  <th className="px-6 py-4 font-medium">Eligibility Rules</th>
-                  <th className="px-6 py-4 font-medium">Required Docs</th>
-                  <th className="px-6 py-4 font-medium">Source / Sync</th>
-                  <th className="px-6 py-4 font-medium">Status</th>
-                  <th className="px-6 py-4"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line bg-card">
-                {filteredSchemes.length === 0 ? (
+            {isLoading ? (
+              <div className="p-12 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+                <Loader2 className="size-6 animate-spin text-brand" />
+                <p className="text-sm">Loading scheme knowledge base from database...</p>
+              </div>
+            ) : (
+              <table className="w-full text-sm text-left">
+                <thead className="bg-ice-2 text-muted-foreground text-xs uppercase tracking-wider">
                   <tr>
-                    <td colSpan={8} className="px-6 py-12 text-center text-muted-foreground">
-                      No schemes found matching the filters.
-                    </td>
+                    <th className="px-6 py-4 font-medium">Scheme</th>
+                    <th className="px-6 py-4 font-medium">Category</th>
+                    <th className="px-6 py-4 font-medium">Jurisdiction</th>
+                    <th className="px-6 py-4 font-medium">Eligibility Rules</th>
+                    <th className="px-6 py-4 font-medium">Required Docs</th>
+                    <th className="px-6 py-4 font-medium">Source / Sync</th>
+                    <th className="px-6 py-4 font-medium">Status</th>
+                    <th className="px-6 py-4"></th>
                   </tr>
-                ) : (
-                  filteredSchemes.map((scheme) => (
-                    <tr
-                      key={scheme.id}
-                      className="hover:bg-ice-2/50 transition-colors group cursor-pointer"
-                      onClick={() => setSelectedScheme(scheme)}
-                    >
-                      <td className="px-6 py-4 font-medium">{scheme.name}</td>
-                      <td className="px-6 py-4 text-muted-foreground">{scheme.category}</td>
-                      <td className="px-6 py-4">
-                        <span
-                          className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${scheme.jurisdiction === "Central" ? "bg-purple-100 text-purple-700" : "bg-amber-100 text-amber-700"}`}
-                        >
-                          {scheme.jurisdiction}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="inline-flex items-center gap-1.5 text-sage font-medium">
-                          <CheckCircle2 className="size-3.5" /> Mapped
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-muted-foreground">{scheme.docs} docs</td>
-                      <td className="px-6 py-4">
-                        <div className="text-xs">
-                          <p className="font-medium text-foreground">{scheme.official_source}</p>
-                          <p className="text-muted-foreground">{scheme.last_verified}</p>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
-                          {scheme.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <ChevronRight className="size-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                </thead>
+                <tbody className="divide-y divide-line bg-card">
+                  {filteredSchemes.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="px-6 py-12 text-center text-muted-foreground">
+                        No schemes found matching the filters.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    filteredSchemes.map((scheme) => (
+                      <tr
+                        key={scheme.id}
+                        className="hover:bg-ice-2/50 transition-colors group cursor-pointer"
+                        onClick={() => setSelectedScheme(scheme)}
+                      >
+                        <td className="px-6 py-4 font-medium">{scheme.name}</td>
+                        <td className="px-6 py-4 text-muted-foreground">{scheme.category}</td>
+                        <td className="px-6 py-4">
+                          <span
+                            className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${scheme.jurisdiction === "Central" ? "bg-purple-100 text-purple-700" : "bg-amber-100 text-amber-700"}`}
+                          >
+                            {scheme.jurisdiction}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="inline-flex items-center gap-1.5 text-sage font-medium">
+                            <CheckCircle2 className="size-3.5" />{" "}
+                            {scheme.eligibility_rules?.length
+                              ? `${scheme.eligibility_rules.length} Rules Mapped`
+                              : "Mapped"}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-muted-foreground">
+                          {scheme.document_requirements?.length || scheme.docs || 0} docs
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="text-xs">
+                            <p className="font-medium text-foreground">{scheme.official_source}</p>
+                            <p className="text-muted-foreground">{scheme.last_verified}</p>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                              scheme.eligibility_status === "Active"
+                                ? "border-emerald-200 bg-emerald-100 text-emerald-700"
+                                : "border-slate-200 bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {scheme.eligibility_status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <ChevronRight className="size-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       </main>
@@ -201,12 +275,24 @@ function AdminSchemesPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-8">
+              {selectedScheme.description && (
+                <div className="p-4 bg-ice-2 rounded-xl border border-line text-sm">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+                    Benefit & Description
+                  </p>
+                  {selectedScheme.benefit && (
+                    <p className="font-semibold text-brand mb-1">{selectedScheme.benefit}</p>
+                  )}
+                  <p className="text-muted-foreground">{selectedScheme.description}</p>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <div className="p-4 bg-ice-2 rounded-xl border border-line">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
                     Source
                   </p>
-                  <p className="font-medium flex items-center gap-2">
+                  <p className="font-medium flex items-center gap-2 text-sm">
                     {selectedScheme.official_source}{" "}
                     <ExternalLink className="size-3 text-muted-foreground" />
                   </p>
@@ -215,7 +301,7 @@ function AdminSchemesPage() {
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
                     Data Health
                   </p>
-                  <p className="font-medium text-sage flex items-center gap-1.5">
+                  <p className="font-medium text-sage flex items-center gap-1.5 text-sm">
                     <CheckCircle2 className="size-4" /> Synced {selectedScheme.last_verified}
                   </p>
                 </div>
@@ -225,37 +311,32 @@ function AdminSchemesPage() {
                 <h4 className="text-sm font-semibold mb-3 border-b border-line pb-2 flex items-center justify-between">
                   Structured Eligibility Rules
                   <span className="text-xs bg-brand/10 text-brand px-2 py-0.5 rounded font-mono">
-                    Mapped
+                    {selectedScheme.eligibility_rules?.length || 0} Rules
                   </span>
                 </h4>
                 <div className="space-y-3">
-                  <div className="flex items-start justify-between p-3 border border-line rounded-lg text-sm bg-card shadow-sm">
-                    <div>
-                      <p className="font-medium">Age Requirement</p>
-                      <p className="text-muted-foreground text-xs font-mono mt-1">
-                        type: numeric_range | source: citizen_profile
-                      </p>
-                    </div>
-                    <span className="font-medium bg-ice-2 px-2 py-1 rounded">18 - 25 years</span>
-                  </div>
-                  <div className="flex items-start justify-between p-3 border border-line rounded-lg text-sm bg-card shadow-sm">
-                    <div>
-                      <p className="font-medium">Household Income</p>
-                      <p className="text-muted-foreground text-xs font-mono mt-1">
-                        type: numeric_max | source: income_certificate
-                      </p>
-                    </div>
-                    <span className="font-medium bg-ice-2 px-2 py-1 rounded">≤ ₹3,00,000</span>
-                  </div>
-                  <div className="flex items-start justify-between p-3 border border-line rounded-lg text-sm bg-card shadow-sm">
-                    <div>
-                      <p className="font-medium">Education Level</p>
-                      <p className="text-muted-foreground text-xs font-mono mt-1">
-                        type: enum | source: citizen_profile
-                      </p>
-                    </div>
-                    <span className="font-medium bg-ice-2 px-2 py-1 rounded">Undergraduate</span>
-                  </div>
+                  {selectedScheme.eligibility_rules && selectedScheme.eligibility_rules.length > 0 ? (
+                    selectedScheme.eligibility_rules.map((rule) => (
+                      <div
+                        key={rule.id}
+                        className="flex items-start justify-between p-3 border border-line rounded-lg text-sm bg-card shadow-sm"
+                      >
+                        <div>
+                          <p className="font-medium">{rule.criterion_name}</p>
+                          <p className="text-muted-foreground text-xs font-mono mt-1">
+                            type: {rule.rule_type} | source: {rule.evidence_source || "Verification Engine"}
+                          </p>
+                        </div>
+                        <span className="font-medium bg-ice-2 px-2 py-1 rounded text-xs">
+                          {rule.requirement}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">
+                      No explicit rules attached. Uses standard civic baseline.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -267,32 +348,48 @@ function AdminSchemesPage() {
                   </span>
                 </h4>
                 <div className="space-y-2">
-                  <div className="p-3 border border-line rounded-lg text-sm bg-card shadow-sm flex items-center justify-between">
-                    <span className="font-medium">Income Certificate</span>
-                    <span className="text-xs uppercase tracking-wider text-muted-foreground">
-                      Mandatory
-                    </span>
-                  </div>
-                  <div className="p-3 border border-line rounded-lg text-sm bg-card shadow-sm flex items-center justify-between">
-                    <span className="font-medium">Enrollment Certificate</span>
-                    <span className="text-xs uppercase tracking-wider text-muted-foreground">
-                      Mandatory
-                    </span>
-                  </div>
-                  <div className="p-3 border border-line rounded-lg text-sm bg-card shadow-sm flex items-center justify-between">
-                    <span className="font-medium">Identity Proof (Aadhaar/PAN)</span>
-                    <span className="text-xs uppercase tracking-wider text-muted-foreground">
-                      Mandatory
-                    </span>
-                  </div>
+                  {selectedScheme.document_requirements && selectedScheme.document_requirements.length > 0 ? (
+                    selectedScheme.document_requirements.map((doc) => (
+                      <div
+                        key={doc.id}
+                        className="p-3 border border-line rounded-lg text-sm bg-card shadow-sm flex items-center justify-between"
+                      >
+                        <span className="font-medium">{doc.document_type}</span>
+                        <span className="text-xs uppercase tracking-wider text-muted-foreground">
+                          {doc.is_mandatory ? "Mandatory" : "Optional"}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">No document constraints specified.</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Status Control */}
+              <div className="p-4 bg-ice-2 rounded-xl border border-line">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                  Scheme Publishing Status
+                </p>
+                <div className="flex gap-2">
+                  {(["Active", "Draft", "Archived"] as const).map((st) => (
+                    <Button
+                      key={st}
+                      variant={selectedScheme.eligibility_status === st ? "default" : "outline"}
+                      size="sm"
+                      disabled={updateStatusMutation.isPending}
+                      onClick={() => updateStatusMutation.mutate({ id: selectedScheme.id, status: st })}
+                    >
+                      {st}
+                    </Button>
+                  ))}
                 </div>
               </div>
 
               <div className="bg-brand/5 p-4 rounded-xl border border-brand/20 flex gap-3 text-brand">
                 <Bot className="size-5 shrink-0" />
                 <p className="text-sm">
-                  This scheme is fully structured and can be autonomously evaluated by the Sahayak
-                  AI Workforce.
+                  This scheme is structured with live database relations and evaluated autonomously by the Sahayak AI Workforce.
                 </p>
               </div>
             </div>
@@ -302,3 +399,4 @@ function AdminSchemesPage() {
     </div>
   );
 }
+

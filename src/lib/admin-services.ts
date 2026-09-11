@@ -286,12 +286,38 @@ export async function getRecentAgentEvents(): Promise<typeof LOCAL_DEMO_AGENT_EV
   }
 }
 
+export type AdminSchemeDetail = {
+  id: string;
+  name: string;
+  category: string;
+  jurisdiction: "Central" | "State";
+  eligibility_status: "Active" | "Draft" | "Archived";
+  official_source: string;
+  last_verified: string;
+  status: string;
+  docs: number;
+  benefit?: string;
+  description?: string;
+  eligibility_rules: {
+    id: string;
+    criterion_name: string;
+    requirement: string;
+    rule_type: string;
+    evidence_source?: string;
+  }[];
+  document_requirements: {
+    id: string;
+    document_type: string;
+    is_mandatory: boolean;
+  }[];
+};
+
 /**
- * Fetch schemes data for admin management
+ * Fetch schemes data for admin management with joined rules and document requirements
  */
-export async function getAdminSchemes(): Promise<typeof LOCAL_DEMO_SCHEMES_DATA> {
+export async function getAdminSchemes(): Promise<AdminSchemeDetail[]> {
   if (!isSupabaseConfigured) {
-    return LOCAL_DEMO_SCHEMES_DATA;
+    return MOCK_SCHEMES_DATA as AdminSchemeDetail[];
   }
 
   try {
@@ -303,11 +329,24 @@ export async function getAdminSchemes(): Promise<typeof LOCAL_DEMO_SCHEMES_DATA>
         eligibility_status,
         official_source,
         last_verified,
-        document_requirements (count)
+        benefit,
+        description,
+        document_requirements (
+          id,
+          document_type,
+          is_mandatory
+        ),
+        eligibility_rules (
+          id,
+          criterion_name,
+          requirement,
+          rule_type,
+          evidence_source
+        )
       `);
 
     if (error || !data || data.length === 0) {
-      return LOCAL_DEMO_SCHEMES_DATA;
+      return MOCK_SCHEMES_DATA as AdminSchemeDetail[];
     }
 
     return data.map((s: any) => ({
@@ -316,14 +355,44 @@ export async function getAdminSchemes(): Promise<typeof LOCAL_DEMO_SCHEMES_DATA>
       category: s.category,
       jurisdiction: s.jurisdiction,
       eligibility_status: s.eligibility_status,
-      docs: s.document_requirements?.[0]?.count || 2,
+      docs: s.document_requirements?.length || 0,
       official_source: s.official_source || "Official Portal",
       last_verified: s.last_verified ? new Date(s.last_verified).toLocaleDateString() : "Today",
       status: s.eligibility_status,
+      benefit: s.benefit || "",
+      description: s.description || "",
+      eligibility_rules: s.eligibility_rules || [],
+      document_requirements: s.document_requirements || [],
     }));
   } catch (err) {
     console.warn("[Sahayak Admin] Error fetching admin schemes:", err);
-    return LOCAL_DEMO_SCHEMES_DATA;
+    return MOCK_SCHEMES_DATA as AdminSchemeDetail[];
+  }
+}
+
+/**
+ * Update scheme status (e.g. Active, Draft, Archived) with real Supabase persistence
+ */
+export async function updateAdminSchemeStatus(
+  schemeId: string,
+  status: "Active" | "Draft" | "Archived",
+): Promise<ServiceResult<boolean>> {
+  if (!isSupabaseConfigured) {
+    return ok(true);
+  }
+
+  try {
+    const { error } = await supabase
+      .from("schemes")
+      .update({ eligibility_status: status, updated_at: new Date().toISOString() })
+      .eq("id", schemeId);
+
+    if (error) {
+      return err(error.message);
+    }
+    return ok(true);
+  } catch (err: any) {
+    return err(err.message || "Failed to update scheme status");
   }
 }
 
@@ -470,7 +539,7 @@ export async function reviewApplication(
 
 import { CANONICAL_SCHEME_LIST } from "./scheme-constants";
 
-export const MOCK_SCHEMES_DATA = CANONICAL_SCHEME_LIST.map((s) => ({
+export const MOCK_SCHEMES_DATA: AdminSchemeDetail[] = CANONICAL_SCHEME_LIST.map((s) => ({
   id: s.id,
   name: s.name,
   category: s.category,
@@ -478,32 +547,36 @@ export const MOCK_SCHEMES_DATA = CANONICAL_SCHEME_LIST.map((s) => ({
   eligibility_status: "Active" as const,
   official_source: s.officialSource,
   last_verified: "Today",
-  created_at: new Date().toISOString(),
   docs: s.documentRequirements.length,
   status: "Active",
-  rulesCount: 4,
   benefit: s.benefit,
   description: s.description,
-  rules: [
+  eligibility_rules: [
     {
-      criterion: "Age & Enrollment",
-      requirement: "Must meet target criteria",
-      verifiedBy: "Eligibility Agent",
+      id: `rule-${s.id}-1`,
+      criterion_name: "Age & Identification",
+      requirement: "Valid citizen identity records",
+      rule_type: "numeric",
+      evidence_source: "Aadhaar Card",
     },
     {
-      criterion: "Income Threshold",
+      id: `rule-${s.id}-2`,
+      criterion_name: "Income Threshold",
       requirement: "Below maximum ceiling",
-      verifiedBy: "Eligibility Agent",
+      rule_type: "numeric",
+      evidence_source: "Income Certificate",
     },
     {
-      criterion: "Jurisdiction / Residence",
-      requirement: "Domicile verified",
-      verifiedBy: "Eligibility Agent",
+      id: `rule-${s.id}-3`,
+      criterion_name: "Scheme Specific Criteria",
+      requirement: "Meets institutional / sectoral requirements",
+      rule_type: "text",
+      evidence_source: "Institutional Verification",
     },
   ],
-  documents: s.documentRequirements.map((d) => ({
-    name: d,
-    mandatory: true,
-    acceptedFormats: "PDF, JPG, PNG",
+  document_requirements: s.documentRequirements.map((d, idx) => ({
+    id: `doc-${s.id}-${idx}`,
+    document_type: d,
+    is_mandatory: true,
   })),
 }));

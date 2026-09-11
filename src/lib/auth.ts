@@ -178,28 +178,11 @@ export async function signIn(
     return { success: false, error: "Invalid credentials. Try demo credentials: 4321 / 1234" };
   }
 
-  // Supabase is configured: handle standard login & demo shortcut with real Supabase Auth session
-  let targetEmail = emailOrIdentifier.trim();
-  let targetPassword = password;
-
-  if (
-    targetEmail === "4321" ||
-    targetEmail === "rahul@sahayak.gov.in" ||
-    targetEmail === "rahul@sahayak.demo"
-  ) {
-    targetEmail = "rahul@sahayak.demo";
-    targetPassword = password === "1234" ? "SahayakDemo@2026" : password;
-  } else if (targetEmail === "admin") {
-    targetEmail = "admin@sahayak.demo";
-    targetPassword = password === "admin" ? "SahayakAdmin@2026" : password;
-  } else if (!targetEmail.includes("@")) {
-    targetEmail = `${targetEmail.replace(/[^a-zA-Z0-9]/g, "")}@sahayak.local`;
-  }
-
+  // Supabase is configured: direct authentication without backdoors or auto-provisioning
   try {
     const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-      email: targetEmail,
-      password: targetPassword,
+      email: emailOrIdentifier.trim(),
+      password,
     });
 
     if (!signInError && signInData.session) {
@@ -207,29 +190,6 @@ export async function signIn(
         localStorage.setItem("sahayak_auth", "true");
       }
       return { success: true };
-    }
-
-    // If demo shortcut was used and user doesn't exist yet, auto-provision the demo user in Supabase
-    if (targetEmail === "rahul@sahayak.demo" || targetEmail === "admin@sahayak.demo") {
-      const isDemoAdmin = targetEmail === "admin@sahayak.demo";
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-        email: targetEmail,
-        password: targetPassword,
-        options: {
-          data: {
-            full_name: isDemoAdmin ? "System Administrator" : "Rahul Sharma",
-            role: isDemoAdmin ? "admin" : "citizen",
-            phone: isDemoAdmin ? "+91 99999 00000" : "+91 98765 43210",
-          },
-        },
-      });
-
-      if (!signUpError && (signUpData.session || signUpData.user)) {
-        if (typeof window !== "undefined") {
-          localStorage.setItem("sahayak_auth", "true");
-        }
-        return { success: true };
-      }
     }
 
     return {
@@ -259,14 +219,16 @@ export async function signUp(
     return { success: true };
   }
 
+  const cleanEmail = email.trim();
+
   try {
     const { data, error } = await supabase.auth.signUp({
-      email,
+      email: cleanEmail,
       password,
       options: {
         data: {
-          full_name: fullName,
-          phone: phone || null,
+          full_name: fullName.trim(),
+          phone: phone?.trim() || null,
         },
       },
     });

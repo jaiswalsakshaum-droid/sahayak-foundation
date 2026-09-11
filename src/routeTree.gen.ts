@@ -18,8 +18,10 @@ import { Route as DocumentsRouteImport } from './routes/documents'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as NotificationsRouteImport } from './routes/notifications'
 import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SchemesRouteImport } from './routes/schemes'
 import { Route as SignupRouteImport } from './routes/signup'
+import { Route as UpdatePasswordRouteImport } from './routes/update-password'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminAgentsRouteImport } from './routes/admin.agents'
 import { Route as AdminSchemesRouteImport } from './routes/admin.schemes'
@@ -71,6 +73,11 @@ const ProfileRoute = ProfileRouteImport.update({
   path: '/profile',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SchemesRoute = SchemesRouteImport.update({
   id: '/schemes',
   path: '/schemes',
@@ -79,6 +86,11 @@ const SchemesRoute = SchemesRouteImport.update({
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
   path: '/signup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UpdatePasswordRoute = UpdatePasswordRouteImport.update({
+  id: '/update-password',
+  path: '/update-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
@@ -117,8 +129,10 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/profile': typeof ProfileRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/schemes': typeof SchemesRoute
   '/signup': typeof SignupRoute
+  '/update-password': typeof UpdatePasswordRoute
   '/admin/agents': typeof AdminAgentsRoute
   '/admin/schemes': typeof AdminSchemesRoute
   '/applications/$id': typeof ApplicationsIdRoute
@@ -135,8 +149,10 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/profile': typeof ProfileRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/schemes': typeof SchemesRoute
   '/signup': typeof SignupRoute
+  '/update-password': typeof UpdatePasswordRoute
   '/admin/agents': typeof AdminAgentsRoute
   '/admin/schemes': typeof AdminSchemesRoute
   '/applications/$id': typeof ApplicationsIdRoute
@@ -154,8 +170,10 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/notifications': typeof NotificationsRoute
   '/profile': typeof ProfileRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/schemes': typeof SchemesRoute
   '/signup': typeof SignupRoute
+  '/update-password': typeof UpdatePasswordRoute
   '/admin/agents': typeof AdminAgentsRoute
   '/admin/schemes': typeof AdminSchemesRoute
   '/applications/$id': typeof ApplicationsIdRoute
@@ -174,8 +192,10 @@ export interface FileRouteTypes {
     | '/login'
     | '/notifications'
     | '/profile'
+    | '/reset-password'
     | '/schemes'
     | '/signup'
+    | '/update-password'
     | '/admin/agents'
     | '/admin/schemes'
     | '/applications/$id'
@@ -192,8 +212,10 @@ export interface FileRouteTypes {
     | '/login'
     | '/notifications'
     | '/profile'
+    | '/reset-password'
     | '/schemes'
     | '/signup'
+    | '/update-password'
     | '/admin/agents'
     | '/admin/schemes'
     | '/applications/$id'
@@ -210,8 +232,10 @@ export interface FileRouteTypes {
     | '/login'
     | '/notifications'
     | '/profile'
+    | '/reset-password'
     | '/schemes'
     | '/signup'
+    | '/update-password'
     | '/admin/agents'
     | '/admin/schemes'
     | '/applications/$id'
@@ -229,8 +253,10 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   NotificationsRoute: typeof NotificationsRoute
   ProfileRoute: typeof ProfileRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
   SchemesRoute: typeof SchemesRoute
   SignupRoute: typeof SignupRoute
+  UpdatePasswordRoute: typeof UpdatePasswordRoute
   AdminAgentsRoute: typeof AdminAgentsRoute
   AdminSchemesRoute: typeof AdminSchemesRoute
   ApplicationsIdRoute: typeof ApplicationsIdRoute
@@ -303,6 +329,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProfileRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/schemes': {
       id: '/schemes'
       path: '/schemes'
@@ -315,6 +348,13 @@ declare module '@tanstack/react-router' {
       path: '/signup'
       fullPath: '/signup'
       preLoaderRoute: typeof SignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/update-password': {
+      id: '/update-password'
+      path: '/update-password'
+      fullPath: '/update-password'
+      preLoaderRoute: typeof UpdatePasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/': {
@@ -365,8 +405,10 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   NotificationsRoute: NotificationsRoute,
   ProfileRoute: ProfileRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
   SchemesRoute: SchemesRoute,
   SignupRoute: SignupRoute,
+  UpdatePasswordRoute: UpdatePasswordRoute,
   AdminAgentsRoute: AdminAgentsRoute,
   AdminSchemesRoute: AdminSchemesRoute,
   ApplicationsIdRoute: ApplicationsIdRoute,
