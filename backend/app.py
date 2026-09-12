@@ -623,9 +623,9 @@ def submit_application(
             supabase_admin.table("notifications").insert({
                 "citizen_id": req.citizen_id,
                 "title": "Application Submitted Successfully",
-                "message": f"Your application (#{tracking_id}) has been submitted and assigned for departmental verification.",
+                "body": f"Your application (#{tracking_id}) has been submitted and assigned for departmental verification.",
                 "type": "application_update",
-                "read": False,
+                "is_read": False,
             }).execute()
         except Exception as ne:
             logger.warning(f"Could not create notification: {ne}")
@@ -1115,6 +1115,201 @@ def get_live_agent_workforce_status():
             "status": "success",
             "agents": agent_stats,
             "system_active": has_active_processing,
+    notes: str = Field(description="Mandatory reviewer reason or notes")
+    admin_id: Optional[str] = None
+
+class AdminSchemeCreateRequest(BaseModel):
+    name: str
+    category: str
+    jurisdiction: str = Field(default="Central")
+    benefit: Optional[str] = ""
+    description: Optional[str] = ""
+    official_source: Optional[str] = "Official Portal"
+    eligibility_status: Optional[str] = "Active"
+    rules: Optional[list] = []
+    documents: Optional[list] = []
+
+class AdminSchemeStatusRequest(BaseModel):
+    status: str = Field(description="'Active', 'Draft', or 'Archived'")
+
+class AdminSchemeUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    jurisdiction: Optional[str] = None
+    benefit: Optional[str] = None
+    description: Optional[str] = None
+    official_source: Optional[str] = None
+    eligibility_status: Optional[str] = None
+    rules: Optional[list] = None
+    documents: Optional[list] = None
+
+
+@app.get("/admin/metrics", status_code=status.HTTP_200_OK)
+def get_live_admin_metrics():
+    """Aggregates live database statistics for the Admin Control Center."""
+    if not supabase_admin:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    try:
+        # 1. Total & Active Citizens count
+        citizens_res = supabase_admin.table("profiles").select("id", count="exact", head=True).execute()
+        citizens_count = citizens_res.count or 0
+
+        # 2. Applications count and status breakdown
+        apps_res = supabase_admin.table("applications").select("status").execute()
+        apps_data = apps_res.data or []
+        total_apps = len(apps_data)
+        
+        status_breakdown = {
+            "draft": 0,
+            "awaiting_approval": 0,
+            "submitted": 0,
+            "under_review": 0,
+            "approved": 0,
+            "rejected": 0,
+        }
+        for a in apps_data:
+            st = a.get("status", "draft")
+            if st in status_breakdown:
+                status_breakdown[st] += 1
+
+        # 3. Documents verified count
+        docs_res = supabase_admin.table("documents").select("id", count="exact", head=True).eq("status", "verified").execute()
+        verified_docs_count = docs_res.count or 0
+
+        # 4. Total Agent tasks / events count
+        events_res = supabase_admin.table("agent_events").select("id", count="exact", head=True).execute()
+        agent_tasks_count = events_res.count or 0
+
+        # 5. Average workflow time calculation from completed agent runs
+        runs_res = (
+            supabase_admin.table("agent_runs")
+            .select("started_at, completed_at")
+            .not_.is_("completed_at", "null")
+            .order("completed_at", desc=True)
+            .limit(30)
+            .execute()
+        )
+        avg_workflow_time = "3.5 mins"
+        if runs_res.data:
+            total_sec = 0
+            valid_cnt = 0
+            for r in runs_res.data:
+                s_at = r.get("started_at")
+                c_at = r.get("completed_at")
+                if s_at and c_at:
+                    try:
+                        from datetime import datetime
+                        s_dt = datetime.fromisoformat(s_at.replace("Z", "+00:00"))
+                        c_dt = datetime.fromisoformat(c_at.replace("Z", "+00:00"))
+                        diff = (c_dt - s_dt).total_seconds()
+                        if 0 < diff < 7200:
+                            total_sec += diff
+                            valid_cnt += 1
+                    except Exception:
+                        pass
+            if valid_cnt > 0:
+                avg_s = total_sec / valid_cnt
+                avg_workflow_time = f"{avg_s / 60:.1f} mins" if avg_s >= 60 else f"{int(avg_s)}s"
+
+        # 6. Applications requiring review
+        review_count = status_breakdown["submitted"] + status_breakdown["under_review"] + status_breakdown["awaiting_approval"]
+
+        return {
+            "status": "success",
+            "metrics": {
+                "active_citizens": citizens_count,
+                "applications_total": total_apps,
+                "applications_by_status": status_breakdown,
+                "documents_verified": verified_docs_count,
+                "agent_tasks_completed": agent_tasks_count,
+                "avg_workflow_time": avg_workflow_time,
+                "applications_requiring_review": review_count,
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error computing admin metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/admin/agents/status", status_code=status.HTTP_200_OK)
+def get_live_agent_workforce_status():
+    """Computes real-time status, execution metrics, and error rates per agent."""
+    if not supabase_admin:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    canonical_agents = [
+        {"id": "citizen", "name": "Citizen Agent", "role": "Intent Parser & Citizen Context"},
+        {"id": "scheme", "name": "Scheme Agent", "role": "Civic Knowledge Retrieval"},
+        {"id": "eligibility", "name": "Eligibility Agent", "role": "Deterministic Rules Evaluation"},
+        {"id": "document", "name": "Document Agent", "role": "Gemini Vision & Verification"},
+        {"id": "application", "name": "Application Agent", "role": "Form Payload Compilation"},
+        {"id": "tracker", "name": "Tracker Agent", "role": "SLA & Status Monitoring"},
+    ]
+
+    try:
+        # Fetch all events to compute per-agent task counts and last active times
+        events_res = (
+            supabase_admin.table("agent_events")
+            .select("id, agent_name, created_at, action, details")
+            .order("created_at", desc=True)
+            .limit(1000)
+            .execute()
+        )
+        events = events_res.data or []
+
+        # Fetch recent runs to compute health / active status
+        runs_res = (
+            supabase_admin.table("agent_runs")
+            .select("id, status, started_at, completed_at")
+            .order("started_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+        runs = runs_res.data or []
+
+        has_active_processing = any(r.get("status") in ["PROCESSING", "ONLINE"] for r in runs)
+        has_recent_failed = any(r.get("status") == "FAILED" for r in runs[:10])
+
+        agent_stats = []
+        for agent in canonical_agents:
+            agent_name = agent["name"]
+            agent_events = [e for e in events if e.get("agent_name") == agent_name or agent["id"] in (e.get("agent_name") or "").lower()]
+            
+            task_count = len(agent_events)
+            last_event = agent_events[0] if agent_events else None
+            last_active = last_event.get("created_at") if last_event else None
+            
+            # Compute live agent status based on system state & events
+            if has_recent_failed and agent["id"] in ["document", "scheme"]:
+                live_status = "ERROR"
+            elif has_active_processing:
+                live_status = "ONLINE"
+            elif last_active:
+                live_status = "ONLINE"
+            else:
+                live_status = "IDLE"
+
+            # Compute error count
+            error_count = sum(1 for e in agent_events if "error" in str(e.get("action", "")).lower() or "missing" in str(e.get("action", "")).lower())
+            error_rate = f"{(error_count / max(1, task_count)) * 100:.1f}%" if task_count > 0 else "0.0%"
+
+            agent_stats.append({
+                "id": agent["id"],
+                "name": agent["name"],
+                "role": agent["role"],
+                "status": live_status,
+                "tasks_processed": task_count,
+                "error_count": error_count,
+                "error_rate": error_rate,
+                "last_active": last_active,
+                "last_action": last_event.get("action") if last_event else "Awaiting invocation",
+            })
+
+        return {
+            "status": "success",
+            "agents": agent_stats,
+            "system_active": has_active_processing,
         }
     except Exception as e:
         logger.error(f"Error fetching agent status: {e}")
@@ -1125,7 +1320,7 @@ def get_live_agent_workforce_status():
 def get_live_agent_activity_feed(limit: int = 40):
     """Returns recent real-time agent activity across all citizens."""
     if not supabase_admin:
-        return {"events": []}
+        return {"status": "error", "events": []}
 
     try:
         res = (
@@ -1224,7 +1419,7 @@ def execute_human_review(req: AdminReviewRequest):
                 "title": notif_title,
                 "body": req.notes,
                 "type": "success" if req.action == "approved" else "critical",
-                "read": False,
+                "is_read": False,
             }).execute()
 
         return {

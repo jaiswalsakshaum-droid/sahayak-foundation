@@ -61,6 +61,25 @@ export const Route = createFileRoute("/admin/")({
   }),
   component: AdminControlCenter,
 });
+function formatFieldValue(val: any): string {
+  if (val === null || val === undefined) return "—";
+  if (typeof val === "object") {
+    if (val.value !== undefined && val.value !== null && val.value !== "") return String(val.value);
+    if (val.val !== undefined && val.val !== null && val.val !== "") return String(val.val);
+    if (val.text !== undefined && val.text !== null && val.text !== "") return String(val.text);
+    if (val.name !== undefined && val.name !== null && val.name !== "") return String(val.name);
+    if (val.requirement !== undefined && val.requirement !== null && val.requirement !== "") return String(val.requirement);
+    if (Array.isArray(val)) return val.map(formatFieldValue).join(", ");
+    try {
+      const keys = Object.keys(val).filter((k) => k !== "status");
+      if (keys.length === 0) return "—";
+      return keys.map((k) => `${k}: ${formatFieldValue(val[k])}`).join(", ");
+    } catch {
+      return String(val);
+    }
+  }
+  return String(val);
+}
 
 function AdminControlCenter() {
   const queryClient = useQueryClient();
@@ -317,7 +336,7 @@ function AdminControlCenter() {
             ) : (auditQuery.data || []).length === 0 ? (
               <p className="text-xs text-slate-500 py-4 text-center">No audit log entries found.</p>
             ) : (
-              <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+              <div className="max-h-60 overflow-y-auto space-y-2 pr-1 scrollbar-none">
                 {(auditQuery.data || []).map((entry) => (
                   <div
                     key={entry.id}
@@ -424,14 +443,28 @@ function AdminControlCenter() {
                       <FileCheck2 className="size-3.5 text-emerald-400" />
                       Applicant Attributes & Extracted Fields
                     </span>
-                    <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
+                    <div className="space-y-1.5 scrollbar-none">
                       {Object.keys(app.applicant_info || {}).length > 0 ? (
-                        Object.entries(app.applicant_info).map(([k, v]) => (
-                          <div key={k} className="flex justify-between text-[11px]">
-                            <span className="text-slate-400">{k}:</span>
-                            <span className="text-slate-200 font-medium">{String(v)}</span>
-                          </div>
-                        ))
+                        Object.entries(app.applicant_info).map(([k, v]: [string, any]) => {
+                          const isVerified = typeof v === "object" && v !== null && v.status === "verified";
+                          const formattedVal = formatFieldValue(v);
+                          return (
+                            <div
+                              key={k}
+                              className="flex items-center justify-between text-[11px] gap-2 pb-1 border-b border-slate-900/60 last:border-0 last:pb-0"
+                            >
+                              <span className="text-slate-400 font-medium shrink-0">{k}:</span>
+                              <div className="flex items-center gap-1.5 min-w-0 text-right">
+                                <span className="text-slate-200 font-medium truncate" title={formattedVal}>
+                                  {formattedVal}
+                                </span>
+                                {isVerified && (
+                                  <CheckCircle2 className="size-3 text-emerald-400 shrink-0" title="Verified by OCR" />
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
                       ) : (
                         <p className="text-[11px] text-slate-500 italic">No custom fields extracted.</p>
                       )}

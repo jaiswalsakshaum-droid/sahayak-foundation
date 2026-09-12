@@ -124,7 +124,7 @@ export function AssistantPage() {
   } | null>(null);
 
   // Sidebar and Section Collapse states
-  const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(true);
+  const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(false);
   const [isThinkingCollapsed, setIsThinkingCollapsed] = useState(false);
 
   // Past Runs / History state
@@ -655,7 +655,7 @@ export function AssistantPage() {
             >
               <ArrowLeft className="size-3.5" /> Back to Dashboard
             </Link>
-            <Button
+            {/* <Button
               variant="outline"
               size="sm"
               onClick={() => setIsLeftSidebarOpen(!isLeftSidebarOpen)}
@@ -663,7 +663,7 @@ export function AssistantPage() {
             >
               <PanelLeft className="size-3.5 text-brand" />
               {isLeftSidebarOpen ? "Collapse Chats" : `Past Inquiries (${pastRuns.length})`}
-            </Button>
+            </Button> */}
           </div>
           <div className="flex items-center gap-2 text-[11px] text-brand-soft">
             <span className="size-1.5 animate-pulse-dot rounded-full bg-sage" />
@@ -728,23 +728,21 @@ export function AssistantPage() {
                       <button
                         key={r.id}
                         onClick={() => handleViewPastRun(r)}
-                        className={`w-full text-left p-2.5 rounded-xl border transition-all flex flex-col gap-1.5 group ${
-                          isCurrent
-                            ? "border-brand bg-brand/5 shadow-xs ring-1 ring-brand/30"
-                            : "border-line bg-card hover:border-brand/40 hover:bg-ice/50"
-                        }`}
+                        className={`w-full text-left p-2.5 rounded-xl border transition-all flex flex-col gap-1.5 group ${isCurrent
+                          ? "border-brand bg-brand/5 shadow-xs ring-1 ring-brand/30"
+                          : "border-line bg-card hover:border-brand/40 hover:bg-ice/50"
+                          }`}
                       >
                         <div className="flex items-center justify-between gap-1.5">
                           <span
-                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                              isDone
-                                ? "bg-sage/15 text-sage"
-                                : isAction
-                                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-                                  : isProc
-                                    ? "bg-brand/15 text-brand"
-                                    : "bg-muted text-muted-foreground"
-                            }`}
+                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${isDone
+                              ? "bg-sage/15 text-sage"
+                              : isAction
+                                ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                                : isProc
+                                  ? "bg-brand/15 text-brand"
+                                  : "bg-muted text-muted-foreground"
+                              }`}
                           >
                             {isDone
                               ? "Draft Ready"
@@ -758,9 +756,8 @@ export function AssistantPage() {
                             {new Date(r.started_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
                           </span>
                         </div>
-                        <p className={`text-xs line-clamp-2 leading-relaxed font-medium transition-colors ${
-                          isCurrent ? "text-brand font-semibold" : "text-foreground group-hover:text-brand"
-                        }`}>
+                        <p className={`text-xs line-clamp-2 leading-relaxed font-medium transition-colors ${isCurrent ? "text-brand font-semibold" : "text-foreground group-hover:text-brand"
+                          }`}>
                           "{r.query}"
                         </p>
                         <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-line/40">
@@ -964,244 +961,240 @@ export function AssistantPage() {
                         </div>
                       </div>
 
-                  {/* Scrollable Agent Feed */}
-                  <div
-                    ref={journeyScrollRef}
-                    onScroll={handleJourneyScroll}
-                    className="flex-1 overflow-y-auto pr-1 space-y-6 scroll-smooth"
-                  >
-                    <div className="relative pl-6 border-l-2 border-line space-y-6 py-2 ml-3">
-                      {journeySteps.map((step, index) => {
-                        const isCurrent = index === activeStepIndex && status === "PROCESSING";
-                        const isPast = (index < activeStepIndex && activeStepIndex !== -1) || (status === "COMPLETED" && (step.messages.length > 0 || index <= 4));
-                        const isUpcoming = !isCurrent && !isPast;
-                        const isExpanded = expandedSteps[step.agentId] ?? true;
+                      {/* Scrollable Agent Feed */}
+                      <div
+                        ref={journeyScrollRef}
+                        onScroll={handleJourneyScroll}
+                        className="flex-1 overflow-y-auto pr-1 space-y-6 scroll-smooth"
+                      >
+                        <div className="relative pl-6 border-l-2 border-line space-y-6 py-2 ml-3">
+                          {journeySteps.map((step, index) => {
+                            const isCurrent = index === activeStepIndex && status === "PROCESSING";
+                            const isPast = (index < activeStepIndex && activeStepIndex !== -1) || (status === "COMPLETED" && (step.messages.length > 0 || index <= 4));
+                            const isUpcoming = !isCurrent && !isPast;
+                            const isExpanded = expandedSteps[step.agentId] ?? true;
 
-                        return (
-                          <div key={step.id} className="relative transition-all duration-200">
-                            <span
-                              className={`absolute -left-[37px] grid size-7 place-items-center rounded-full border-2 transition-all ${
-                                isCurrent
-                                  ? "bg-brand border-brand text-primary-foreground animate-pulse shadow-[0_0_12px_rgba(37,99,235,0.4)]"
-                                  : isPast
-                                    ? "bg-sage border-sage text-primary-foreground"
-                                    : "bg-card border-line/60 text-muted-foreground/50"
-                              }`}
-                            >
-                              <step.icon className="size-3.5" />
-                            </span>
-
-                            <div className="pl-2">
-                              <div
-                                className="flex items-center justify-between cursor-pointer select-none"
-                                onClick={() => toggleStepExpansion(step.agentId)}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <h3
-                                    className={`font-medium text-xs flex items-center gap-1.5 ${
-                                      isCurrent
-                                        ? "text-brand font-semibold"
-                                        : isPast
-                                          ? "text-foreground"
-                                          : "text-muted-foreground/60"
+                            return (
+                              <div key={step.id} className="relative transition-all duration-200">
+                                <span
+                                  className={`absolute -left-[37px] grid size-7 place-items-center rounded-full border-2 transition-all ${isCurrent
+                                    ? "bg-brand border-brand text-primary-foreground animate-pulse shadow-[0_0_12px_rgba(37,99,235,0.4)]"
+                                    : isPast
+                                      ? "bg-sage border-sage text-primary-foreground"
+                                      : "bg-card border-line/60 text-muted-foreground/50"
                                     }`}
+                                >
+                                  <step.icon className="size-3.5" />
+                                </span>
+
+                                <div className="pl-2">
+                                  <div
+                                    className="flex items-center justify-between cursor-pointer select-none"
+                                    onClick={() => toggleStepExpansion(step.agentId)}
                                   >
-                                    {step.name}
-                                  </h3>
-                                  {isUpcoming && (
-                                    <span className="text-[10px] text-muted-foreground/50 border border-line/60 rounded px-1.5 py-0.2">
-                                      Queued
-                                    </span>
-                                  )}
-                                  {isPast && (
-                                    <span className="text-[10px] text-sage font-medium flex items-center gap-0.5">
-                                      <Check className="size-2.5" /> Done
-                                    </span>
-                                  )}
-                                </div>
-                                {(step.messages.length > 0 || isCurrent) && (
-                                  <button className="text-muted-foreground hover:text-foreground">
-                                    {isExpanded ? (
-                                      <ChevronUp className="size-3.5" />
-                                    ) : (
-                                      <ChevronDown className="size-3.5" />
-                                    )}
-                                  </button>
-                                )}
-                              </div>
-
-                              {isExpanded && step.messages.length > 0 && (
-                                <div className="mt-2 space-y-2">
-                                  {step.messages.map((msg, i) => {
-                                    const isWarning = msg.startsWith("⚠️") || msg.toLowerCase().includes("notice") || msg.toLowerCase().includes("issue");
-                                    return (
-                                      <div
-                                        key={i}
-                                        className={`text-xs rounded-md p-2.5 border leading-relaxed ${
-                                          isWarning
-                                            ? "bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200 font-medium"
-                                            : "bg-ice-2/60 border-line text-muted-foreground"
-                                        }`}
+                                    <div className="flex items-center gap-2">
+                                      <h3
+                                        className={`font-medium text-xs flex items-center gap-1.5 ${isCurrent
+                                          ? "text-brand font-semibold"
+                                          : isPast
+                                            ? "text-foreground"
+                                            : "text-muted-foreground/60"
+                                          }`}
                                       >
-                                        {msg}
-                                      </div>
-                                    );
-                                  })}
-
-                                  {/* Real-Time Agent Thought Stream */}
-                                  {step.details?.thought && (
-                                    <div className="p-2 rounded-md bg-brand/5 border border-brand/10 text-[11px] text-muted-foreground flex items-start gap-1.5">
-                                      <span className="text-brand shrink-0 mt-0.5">💭</span>
-                                      <span className="italic">{step.details.thought}</span>
-                                    </div>
-                                  )}
-
-                                  {/* Structured Findings Drawer per Agent */}
-                                  {step.agentId === "citizen" && step.details?.intent && (
-                                    <div className="p-2.5 rounded-lg bg-brand/5 border border-brand/15 text-xs space-y-1.5">
-                                      <div className="flex items-center gap-2">
-                                        <span className="font-semibold text-brand">Category:</span>
-                                        <span className="px-2 py-0.5 rounded bg-brand/10 text-brand font-medium">
-                                          {step.details.intent.category}
+                                        {step.name}
+                                      </h3>
+                                      {isUpcoming && (
+                                        <span className="text-[10px] text-muted-foreground/50 border border-line/60 rounded px-1.5 py-0.2">
+                                          Queued
                                         </span>
-                                        <span className="font-semibold text-muted-foreground ml-2">
-                                          Urgency:
+                                      )}
+                                      {isPast && (
+                                        <span className="text-[10px] text-sage font-medium flex items-center gap-0.5">
+                                          <Check className="size-2.5" /> Done
                                         </span>
-                                        <span className="capitalize text-muted-foreground font-medium">
-                                          {step.details.intent.urgency}
-                                        </span>
-                                      </div>
-                                      {step.details.intent.summary && (
-                                        <p className="text-[11px] text-muted-foreground italic">
-                                          "{step.details.intent.summary}"
-                                        </p>
                                       )}
                                     </div>
+                                    {(step.messages.length > 0 || isCurrent) && (
+                                      <button className="text-muted-foreground hover:text-foreground">
+                                        {isExpanded ? (
+                                          <ChevronUp className="size-3.5" />
+                                        ) : (
+                                          <ChevronDown className="size-3.5" />
+                                        )}
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {isExpanded && step.messages.length > 0 && (
+                                    <div className="mt-2 space-y-2">
+                                      {step.messages.map((msg, i) => {
+                                        const isWarning = msg.startsWith("⚠️") || msg.toLowerCase().includes("notice") || msg.toLowerCase().includes("issue");
+                                        return (
+                                          <div
+                                            key={i}
+                                            className={`text-xs rounded-md p-2.5 border leading-relaxed ${isWarning
+                                              ? "bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200 font-medium"
+                                              : "bg-ice-2/60 border-line text-muted-foreground"
+                                              }`}
+                                          >
+                                            {msg}
+                                          </div>
+                                        );
+                                      })}
+
+                                      {/* Real-Time Agent Thought Stream */}
+                                      {step.details?.thought && (
+                                        <div className="p-2 rounded-md bg-brand/5 border border-brand/10 text-[11px] text-muted-foreground flex items-start gap-1.5">
+                                          <span className="text-brand shrink-0 mt-0.5">💭</span>
+                                          <span className="italic">{step.details.thought}</span>
+                                        </div>
+                                      )}
+
+                                      {/* Structured Findings Drawer per Agent */}
+                                      {step.agentId === "citizen" && step.details?.intent && (
+                                        <div className="p-2.5 rounded-lg bg-brand/5 border border-brand/15 text-xs space-y-1.5">
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-semibold text-brand">Category:</span>
+                                            <span className="px-2 py-0.5 rounded bg-brand/10 text-brand font-medium">
+                                              {step.details.intent.category}
+                                            </span>
+                                            <span className="font-semibold text-muted-foreground ml-2">
+                                              Urgency:
+                                            </span>
+                                            <span className="capitalize text-muted-foreground font-medium">
+                                              {step.details.intent.urgency}
+                                            </span>
+                                          </div>
+                                          {step.details.intent.summary && (
+                                            <p className="text-[11px] text-muted-foreground italic">
+                                              "{step.details.intent.summary}"
+                                            </p>
+                                          )}
+                                        </div>
+                                      )}
+
+                                      {step.agentId === "eligibility" &&
+                                        step.details?.eligibility?.criteria && (
+                                          <div className="p-2.5 rounded-lg bg-card border border-line text-xs space-y-2">
+                                            <div className="font-semibold text-[11px] uppercase tracking-wider text-muted-foreground">
+                                              Evaluated Criteria & Evidence
+                                            </div>
+                                            {step.details.eligibility.criteria.map(
+                                              (crit: any, cIdx: number) => {
+                                                const critId = `${step.id}-${cIdx}`;
+                                                const isShowingEv = showEvidence[critId];
+                                                return (
+                                                  <div
+                                                    key={cIdx}
+                                                    className="p-2 rounded bg-ice-2/40 border border-line space-y-1"
+                                                  >
+                                                    <div className="flex items-center justify-between">
+                                                      <span className="font-medium text-foreground">
+                                                        {crit.criterion_name || crit.name}
+                                                      </span>
+                                                      <span
+                                                        className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${crit.status === "verified"
+                                                          ? "bg-sage/15 text-sage"
+                                                          : "bg-coral/15 text-coral"
+                                                          }`}
+                                                      >
+                                                        {crit.status}
+                                                      </span>
+                                                    </div>
+                                                    <p className="text-[11px] text-muted-foreground">
+                                                      {crit.explanation || crit.requirement}
+                                                    </p>
+                                                    <button
+                                                      onClick={() => toggleEvidence(critId)}
+                                                      className="text-[10px] text-brand flex items-center gap-1 hover:underline pt-0.5"
+                                                    >
+                                                      <Eye className="size-2.5" />
+                                                      {isShowingEv ? "Hide Evidence" : "Show Evidence"}
+                                                    </button>
+                                                    {isShowingEv && (
+                                                      <div className="mt-1 p-2 rounded bg-card text-[11px] text-muted-foreground border border-line">
+                                                        <p>
+                                                          <strong>Requirement:</strong>{" "}
+                                                          {typeof crit.requirement === "object" && crit.requirement !== null
+                                                            ? JSON.stringify(crit.requirement)
+                                                            : String(crit.requirement ?? "—")}
+                                                        </p>
+                                                        <p>
+                                                          <strong>Citizen Data:</strong>{" "}
+                                                          {typeof (crit.citizen_info ?? crit.citizenInfo) === "object" &&
+                                                            (crit.citizen_info ?? crit.citizenInfo) !== null
+                                                            ? JSON.stringify(crit.citizen_info ?? crit.citizenInfo)
+                                                            : String(crit.citizen_info ?? crit.citizenInfo ?? "—")}
+                                                        </p>
+                                                        <p>
+                                                          <strong>Source:</strong>{" "}
+                                                          {typeof (crit.evidence_source ?? crit.evidenceSource) === "object" &&
+                                                            (crit.evidence_source ?? crit.evidenceSource) !== null
+                                                            ? JSON.stringify(crit.evidence_source ?? crit.evidenceSource)
+                                                            : String(crit.evidence_source ?? crit.evidenceSource ?? "—")}
+                                                        </p>
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                );
+                                              },
+                                            )}
+                                          </div>
+                                        )}
+
+                                      {step.agentId === "document" &&
+                                        step.details?.missing_documents &&
+                                        step.details.missing_documents.length > 0 && (
+                                          <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-800 dark:text-amber-300 space-y-1">
+                                            <p className="font-semibold flex items-center gap-1.5">
+                                              <FileWarning className="size-3.5 text-amber-600" />
+                                              Missing Documents Required:
+                                            </p>
+                                            <div className="flex flex-wrap gap-1.5 pt-1">
+                                              {step.details.missing_documents.map(
+                                                (doc: string, dIdx: number) => (
+                                                  <span
+                                                    key={dIdx}
+                                                    className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-200 text-[11px] font-medium"
+                                                  >
+                                                    {typeof doc === "object" && doc !== null ? JSON.stringify(doc) : String(doc)}
+                                                  </span>
+                                                ),
+                                              )}
+                                            </div>
+                                          </div>
+                                        )}
+                                    </div>
                                   )}
 
-                                  {step.agentId === "eligibility" &&
-                                    step.details?.eligibility?.criteria && (
-                                      <div className="p-2.5 rounded-lg bg-card border border-line text-xs space-y-2">
-                                        <div className="font-semibold text-[11px] uppercase tracking-wider text-muted-foreground">
-                                          Evaluated Criteria & Evidence
-                                        </div>
-                                        {step.details.eligibility.criteria.map(
-                                          (crit: any, cIdx: number) => {
-                                            const critId = `${step.id}-${cIdx}`;
-                                            const isShowingEv = showEvidence[critId];
-                                            return (
-                                              <div
-                                                key={cIdx}
-                                                className="p-2 rounded bg-ice-2/40 border border-line space-y-1"
-                                              >
-                                                <div className="flex items-center justify-between">
-                                                  <span className="font-medium text-foreground">
-                                                    {crit.criterion_name || crit.name}
-                                                  </span>
-                                                  <span
-                                                    className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
-                                                      crit.status === "verified"
-                                                        ? "bg-sage/15 text-sage"
-                                                        : "bg-coral/15 text-coral"
-                                                    }`}
-                                                  >
-                                                    {crit.status}
-                                                  </span>
-                                                </div>
-                                                <p className="text-[11px] text-muted-foreground">
-                                                  {crit.explanation || crit.requirement}
-                                                </p>
-                                                <button
-                                                  onClick={() => toggleEvidence(critId)}
-                                                  className="text-[10px] text-brand flex items-center gap-1 hover:underline pt-0.5"
-                                                >
-                                                  <Eye className="size-2.5" />
-                                                  {isShowingEv ? "Hide Evidence" : "Show Evidence"}
-                                                </button>
-                                                 {isShowingEv && (
-                                                   <div className="mt-1 p-2 rounded bg-card text-[11px] text-muted-foreground border border-line">
-                                                     <p>
-                                                       <strong>Requirement:</strong>{" "}
-                                                       {typeof crit.requirement === "object" && crit.requirement !== null
-                                                         ? JSON.stringify(crit.requirement)
-                                                         : String(crit.requirement ?? "—")}
-                                                     </p>
-                                                     <p>
-                                                       <strong>Citizen Data:</strong>{" "}
-                                                       {typeof (crit.citizen_info ?? crit.citizenInfo) === "object" &&
-                                                       (crit.citizen_info ?? crit.citizenInfo) !== null
-                                                         ? JSON.stringify(crit.citizen_info ?? crit.citizenInfo)
-                                                         : String(crit.citizen_info ?? crit.citizenInfo ?? "—")}
-                                                     </p>
-                                                     <p>
-                                                       <strong>Source:</strong>{" "}
-                                                       {typeof (crit.evidence_source ?? crit.evidenceSource) === "object" &&
-                                                       (crit.evidence_source ?? crit.evidenceSource) !== null
-                                                         ? JSON.stringify(crit.evidence_source ?? crit.evidenceSource)
-                                                         : String(crit.evidence_source ?? crit.evidenceSource ?? "—")}
-                                                     </p>
-                                                   </div>
-                                                 )}
-                                               </div>
-                                             );
-                                           },
-                                         )}
-                                       </div>
-                                     )}
+                                  {isCurrent && (
+                                    <div className="mt-2 text-xs text-brand flex items-center gap-2 font-medium animate-pulse">
+                                      <div className="size-2 rounded-full bg-brand" />
+                                      Agent processing your request...
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
 
-                                   {step.agentId === "document" &&
-                                     step.details?.missing_documents &&
-                                     step.details.missing_documents.length > 0 && (
-                                       <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-800 dark:text-amber-300 space-y-1">
-                                         <p className="font-semibold flex items-center gap-1.5">
-                                           <FileWarning className="size-3.5 text-amber-600" />
-                                           Missing Documents Required:
-                                         </p>
-                                         <div className="flex flex-wrap gap-1.5 pt-1">
-                                           {step.details.missing_documents.map(
-                                             (doc: string, dIdx: number) => (
-                                               <span
-                                                 key={dIdx}
-                                                 className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-200 text-[11px] font-medium"
-                                               >
-                                                 {typeof doc === "object" && doc !== null ? JSON.stringify(doc) : String(doc)}
-                                               </span>
-                                             ),
-                                           )}
-                                         </div>
-                                       </div>
-                                     )}
-                                 </div>
-                               )}
-
-                               {isCurrent && (
-                                 <div className="mt-2 text-xs text-brand flex items-center gap-2 font-medium animate-pulse">
-                                   <div className="size-2 rounded-full bg-brand" />
-                                   Agent processing your request...
-                                 </div>
-                               )}
-                             </div>
-                           </div>
-                         );
-                       })}
-                     </div>
-                   </div>
-
-                   {/* Floating Jump to Latest Button */}
-                   {showScrollBottomPill && (
-                     <button
-                       onClick={scrollToBottom}
-                       className="absolute bottom-4 right-4 bg-brand text-primary-foreground px-3 py-1.5 rounded-full text-xs font-medium shadow-md hover:bg-brand/90 flex items-center gap-1.5 transition-all animate-bounce"
-                     >
-                       <ArrowDown className="size-3.5" /> Jump to latest
-                     </button>
-                   )}
-                 </div>
-               </div>
+                      {/* Floating Jump to Latest Button */}
+                      {showScrollBottomPill && (
+                        <button
+                          onClick={scrollToBottom}
+                          className="absolute bottom-4 right-4 bg-brand text-primary-foreground px-3 py-1.5 rounded-full text-xs font-medium shadow-md hover:bg-brand/90 flex items-center gap-1.5 transition-all animate-bounce"
+                        >
+                          <ArrowDown className="size-3.5" /> Jump to latest
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 ) : null}
 
-               {/* Right Column: Dynamic Stage View (Skeletons -> Action Required -> Application Ready -> Discovered Schemes) */}
-               <div className="flex-1 w-full min-w-0">
+                {/* Right Column: Dynamic Stage View (Skeletons -> Action Required -> Application Ready -> Discovered Schemes) */}
+                <div className="flex-1 w-full min-w-0">
                   {/* Banner when thinking is collapsed */}
                   {isThinkingCollapsed && (
                     <div className="mb-4 flex items-center justify-between p-3.5 rounded-xl border border-line bg-card shadow-xs">
@@ -1245,7 +1238,7 @@ export function AssistantPage() {
                     </div>
                   )}
 
-                 {/* 1. COMPLETED: Application Ready Final Summary Screen */}
+                  {/* 1. COMPLETED: Application Ready Final Summary Screen */}
                   {status === "COMPLETED" && applicationDraft ? (
                     <div className="rounded-xl border border-sage/40 bg-card p-6 shadow-sm space-y-6 animate-in fade-in duration-300">
                       {/* Top Header */}
@@ -1366,22 +1359,20 @@ export function AssistantPage() {
                             return (
                               <div
                                 key={field}
-                                className={`p-3 rounded-lg border transition-all ${
-                                  isEditingDraft
-                                    ? "bg-card border-brand/40 shadow-sm"
-                                    : "bg-ice-2/40 border-line"
-                                } flex flex-col justify-between gap-2`}
+                                className={`p-3 rounded-lg border transition-all ${isEditingDraft
+                                  ? "bg-card border-brand/40 shadow-sm"
+                                  : "bg-ice-2/40 border-line"
+                                  } flex flex-col justify-between gap-2`}
                               >
                                 <div className="flex items-center justify-between">
                                   <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
                                     {field}
                                   </span>
                                   <span
-                                    className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                                      statusBadge === "verified"
-                                        ? "bg-sage/15 text-sage"
-                                        : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-                                    }`}
+                                    className={`px-2 py-0.5 rounded text-[10px] font-semibold ${statusBadge === "verified"
+                                      ? "bg-sage/15 text-sage"
+                                      : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                                      }`}
                                   >
                                     {statusBadge === "verified" ? "Verified" : "Review"}
                                   </span>
@@ -1441,11 +1432,10 @@ export function AssistantPage() {
                             {followUpMessages.map((m, mIdx) => (
                               <div
                                 key={mIdx}
-                                className={`p-2 rounded text-xs leading-relaxed ${
-                                  m.sender === "user"
-                                    ? "bg-brand/10 text-brand font-medium ml-4"
-                                    : "bg-ice-2 text-foreground mr-4 border border-line"
-                                }`}
+                                className={`p-2 rounded text-xs leading-relaxed ${m.sender === "user"
+                                  ? "bg-brand/10 text-brand font-medium ml-4"
+                                  : "bg-ice-2 text-foreground mr-4 border border-line"
+                                  }`}
                               >
                                 <span className="font-semibold text-[10px] uppercase block text-muted-foreground mb-0.5">
                                   {m.sender === "user" ? "You" : "Sahayak AI"}
@@ -1536,302 +1526,299 @@ export function AssistantPage() {
                       </div>
                     </div>
                   ) : (status === "ACTION_REQUIRED" || missingDocsList.length > 0) && status !== "COMPLETED" ? (
-                  /* 2. ACTION_REQUIRED: Multi-Document Inline Uploader & Auto-Resume Trigger (Phase C) */
-                  <div className="rounded-xl border border-amber-500/40 bg-card p-6 shadow-sm space-y-6 animate-in fade-in duration-300">
-                    <div className="flex items-start gap-3">
-                      <div className="grid size-10 place-items-center rounded-xl bg-amber-500/15 text-amber-600 shrink-0">
-                        <FileWarning className="size-5" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h2 className="text-lg font-bold font-display text-foreground">
-                            Action Required: Missing Documents
-                          </h2>
-                          <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300">
-                            Paused for Input
-                          </span>
+                    /* 2. ACTION_REQUIRED: Multi-Document Inline Uploader & Auto-Resume Trigger (Phase C) */
+                    <div className="rounded-xl border border-amber-500/40 bg-card p-6 shadow-sm space-y-6 animate-in fade-in duration-300">
+                      <div className="flex items-start gap-3">
+                        <div className="grid size-10 place-items-center rounded-xl bg-amber-500/15 text-amber-600 shrink-0">
+                          <FileWarning className="size-5" />
                         </div>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Document Agent paused the workflow. Upload any of the {missingDocsList.length} required document(s) below to automatically extract data, re-evaluate eligibility, and resume application drafting.
-                        </p>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h2 className="text-lg font-bold font-display text-foreground">
+                              Action Required: Missing Documents
+                            </h2>
+                            <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300">
+                              Paused for Input
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Document Agent paused the workflow. Upload any of the {missingDocsList.length} required document(s) below to automatically extract data, re-evaluate eligibility, and resume application drafting.
+                          </p>
+                        </div>
                       </div>
-                    </div>
 
-                    {/* Hidden Native File Input */}
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      accept="image/*,application/pdf"
-                      className="hidden"
-                      onChange={handleMissingDocUpload}
-                    />
+                      {/* Hidden Native File Input */}
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        accept="image/*,application/pdf"
+                        className="hidden"
+                        onChange={handleMissingDocUpload}
+                      />
 
-                    {/* Document List Grid */}
-                    <div className="space-y-3">
-                      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                        Required Documents ({missingDocsList.length})
-                      </h3>
-                      <div className="grid grid-cols-1 gap-2.5">
-                        {missingDocsList.map((docName, idx) => {
-                          const isThisUploading = isUploadingMissingDoc && selectedUploadDocType === docName;
-                          const isUploaded = uploadSuccessDoc === docName;
+                      {/* Document List Grid */}
+                      <div className="space-y-3">
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          Required Documents ({missingDocsList.length})
+                        </h3>
+                        <div className="grid grid-cols-1 gap-2.5">
+                          {missingDocsList.map((docName, idx) => {
+                            const isThisUploading = isUploadingMissingDoc && selectedUploadDocType === docName;
+                            const isUploaded = uploadSuccessDoc === docName;
 
-                          return (
-                            <div
-                              key={idx}
-                              className={`p-4 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                                isUploaded
+                            return (
+                              <div
+                                key={idx}
+                                className={`p-4 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${isUploaded
                                   ? "border-sage/50 bg-sage/5"
                                   : "border-line bg-ice-2/30 hover:border-brand/40"
-                              }`}
-                            >
-                              <div className="flex items-center gap-3">
-                                <div className={`grid size-9 place-items-center rounded-lg ${
-                                  isUploaded ? "bg-sage/15 text-sage" : "bg-brand/10 text-brand"
-                                }`}>
-                                  {isUploaded ? <Check className="size-4" /> : <FileText className="size-4" />}
-                                </div>
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-sm font-semibold text-foreground">
-                                      {docName}
-                                    </span>
-                                    <span className="text-[10px] px-2 py-0.5 rounded font-medium bg-amber-500/15 text-amber-700 dark:text-amber-300">
-                                      Mandatory
-                                    </span>
+                                  }`}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className={`grid size-9 place-items-center rounded-lg ${isUploaded ? "bg-sage/15 text-sage" : "bg-brand/10 text-brand"
+                                    }`}>
+                                    {isUploaded ? <Check className="size-4" /> : <FileText className="size-4" />}
                                   </div>
-                                  <p className="text-[11px] text-muted-foreground mt-0.5">
-                                    {isUploaded
-                                      ? "Verified with Vision AI · Auto-resuming run..."
-                                      : "PDF or clear photo (max 10MB)"}
-                                  </p>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm font-semibold text-foreground">
+                                        {docName}
+                                      </span>
+                                      <span className="text-[10px] px-2 py-0.5 rounded font-medium bg-amber-500/15 text-amber-700 dark:text-amber-300">
+                                        Mandatory
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                                      {isUploaded
+                                        ? "Verified with Vision AI · Auto-resuming run..."
+                                        : "PDF or clear photo (max 10MB)"}
+                                    </p>
+                                  </div>
                                 </div>
+
+                                <Button
+                                  size="sm"
+                                  variant={isUploaded ? "outline" : "default"}
+                                  disabled={isUploadingMissingDoc}
+                                  onClick={() => triggerUploadForDoc(docName)}
+                                  className={`shrink-0 gap-1.5 ${isUploaded
+                                    ? "border-sage/40 text-sage hover:bg-sage/10"
+                                    : "bg-brand hover:bg-brand/90"
+                                    }`}
+                                >
+                                  {isThisUploading ? (
+                                    <>
+                                      <Loader2 className="size-3.5 animate-spin" /> Extracting...
+                                    </>
+                                  ) : isUploaded ? (
+                                    <>
+                                      <Check className="size-3.5" /> Uploaded
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Upload className="size-3.5" /> Upload {docName}
+                                    </>
+                                  )}
+                                </Button>
                               </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Active Extraction / Gemini Vision Progress Indicator */}
+                      {uploadExtractionStep && (
+                        <div className="p-3.5 rounded-lg bg-brand/10 border border-brand/25 text-xs text-brand font-medium flex items-center gap-2.5 animate-pulse">
+                          <Loader2 className="size-4 animate-spin shrink-0" />
+                          <span>{uploadExtractionStep}</span>
+                        </div>
+                      )}
+
+                      {/* Action Controls & Continue Button */}
+                      <div className="pt-4 border-t border-line flex flex-wrap items-center justify-between gap-3">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isUploadingMissingDoc}
+                          onClick={() => handleResumeWorkflow(false)}
+                          className="gap-1.5"
+                        >
+                          <RefreshCw className={`size-3.5 ${isUploadingMissingDoc ? "animate-spin" : ""}`} />
+                          Re-Check & Resume
+                        </Button>
+
+                        <Button
+                          size="sm"
+                          disabled={isUploadingMissingDoc}
+                          onClick={() => {
+                            if (missingDocsList.length > 0) {
+                              setShowMissingDocsConfirmDialog(true);
+                            } else {
+                              handleResumeWorkflow(false);
+                            }
+                          }}
+                          className="bg-brand hover:bg-brand/90 gap-1.5"
+                        >
+                          Done Uploads — Continue <ArrowRight className="size-4" />
+                        </Button>
+                      </div>
+
+                      {/* Confirmation Dialog: Proceed with Incomplete Documents */}
+                      <Dialog open={showMissingDocsConfirmDialog} onOpenChange={setShowMissingDocsConfirmDialog}>
+                        <DialogContent className="sm:max-w-md">
+                          <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2 text-amber-600 text-base">
+                              <FileWarning className="size-5" />
+                              Proceed with Incomplete Documents?
+                            </DialogTitle>
+                          </DialogHeader>
+
+                          <div className="space-y-3 py-2 text-xs text-muted-foreground">
+                            <p>
+                              The following mandatory document(s) have not been uploaded yet:
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {missingDocsList.map((doc, i) => (
+                                <span
+                                  key={i}
+                                  className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-800 dark:text-amber-200 font-semibold text-[11px]"
+                                >
+                                  {doc}
+                                </span>
+                              ))}
+                            </div>
+                            <p className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300">
+                              If you continue without uploading these documents, your application draft will be generated with <strong>"Review Required"</strong> flags for missing proof and will require manual departmental review.
+                            </p>
+                          </div>
+
+                          <div className="flex items-center justify-end gap-2 pt-3 border-t border-line">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setShowMissingDocsConfirmDialog(false)}
+                            >
+                              Upload Remaining Docs
+                            </Button>
+                            <Button
+                              size="sm"
+                              className="bg-brand hover:bg-brand/90 gap-1"
+                              onClick={() => handleResumeWorkflow(true)}
+                            >
+                              Proceed Anyway <ArrowRight className="size-3.5" />
+                            </Button>
+                          </div>
+                        </DialogContent>
+                      </Dialog>
+                    </div>
+                  ) : candidateSchemes.length > 0 ? (
+                    /* 3. Discovered Candidate Schemes list */
+                    <div className="space-y-6">
+                      <div className="flex items-center justify-between">
+                        <h2 className="text-xl font-display font-semibold">
+                          {t("assistant.matchedSchemes", "Discovered Matching Schemes")}
+                        </h2>
+                        <span className="text-xs bg-brand/10 text-brand px-3 py-1 rounded-full font-medium">
+                          Verified Catalog
+                        </span>
+                      </div>
+
+                      <div className="grid gap-4">
+                        {candidateSchemes.map((scheme) => (
+                          <div
+                            key={scheme.id}
+                            className="rounded-xl border border-line bg-card p-5 hover:border-brand/40 transition-colors shadow-none"
+                          >
+                            <div className="flex justify-between items-start mb-3">
+                              <div>
+                                <span className="text-[11px] font-semibold uppercase tracking-wider text-brand-soft">
+                                  {scheme.category}
+                                </span>
+                                <h3 className="font-semibold text-lg flex items-center gap-2 mt-0.5">
+                                  {scheme.name}
+                                  {scheme.official && <CheckCircle2 className="size-4 text-brand" />}
+                                </h3>
+                                <p className="text-brand font-medium text-sm mt-1">{scheme.benefit}</p>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-xl font-bold font-display text-sage">
+                                  {scheme.matchScore}%
+                                </div>
+                                <div className="text-[11px] text-muted-foreground">Match</div>
+                              </div>
+                            </div>
+
+                            <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
+                              {scheme.description}
+                            </p>
+
+                            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-line">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-xs text-brand hover:bg-brand/5 p-0 h-auto font-medium"
+                                onClick={() => setSelectedScheme(scheme)}
+                              >
+                                {t("assistant.viewEligibility", "View Eligibility Breakdown")}{" "}
+                                <ChevronRight className="size-3.5 ml-0.5" />
+                              </Button>
 
                               <Button
                                 size="sm"
-                                variant={isUploaded ? "outline" : "default"}
-                                disabled={isUploadingMissingDoc}
-                                onClick={() => triggerUploadForDoc(docName)}
-                                className={`shrink-0 gap-1.5 ${
-                                  isUploaded
-                                    ? "border-sage/40 text-sage hover:bg-sage/10"
-                                    : "bg-brand hover:bg-brand/90"
-                                }`}
+                                onClick={() =>
+                                  navigate({ to: "/documents", search: { scheme: scheme.id } })
+                                }
                               >
-                                {isThisUploading ? (
-                                  <>
-                                    <Loader2 className="size-3.5 animate-spin" /> Extracting...
-                                  </>
-                                ) : isUploaded ? (
-                                  <>
-                                    <Check className="size-3.5" /> Uploaded
-                                  </>
-                                ) : (
-                                  <>
-                                    <Upload className="size-3.5" /> Upload {docName}
-                                  </>
-                                )}
+                                {t("assistant.startApplication", {
+                                  docCount: scheme.reqDocs?.length || 3,
+                                })}
+                                <ArrowRight className="size-3.5 ml-1.5" />
                               </Button>
                             </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Active Extraction / Gemini Vision Progress Indicator */}
-                    {uploadExtractionStep && (
-                      <div className="p-3.5 rounded-lg bg-brand/10 border border-brand/25 text-xs text-brand font-medium flex items-center gap-2.5 animate-pulse">
-                        <Loader2 className="size-4 animate-spin shrink-0" />
-                        <span>{uploadExtractionStep}</span>
-                      </div>
-                    )}
-
-                    {/* Action Controls & Continue Button */}
-                    <div className="pt-4 border-t border-line flex flex-wrap items-center justify-between gap-3">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={isUploadingMissingDoc}
-                        onClick={() => handleResumeWorkflow(false)}
-                        className="gap-1.5"
-                      >
-                        <RefreshCw className={`size-3.5 ${isUploadingMissingDoc ? "animate-spin" : ""}`} />
-                        Re-Check & Resume
-                      </Button>
-
-                      <Button
-                        size="sm"
-                        disabled={isUploadingMissingDoc}
-                        onClick={() => {
-                          if (missingDocsList.length > 0) {
-                            setShowMissingDocsConfirmDialog(true);
-                          } else {
-                            handleResumeWorkflow(false);
-                          }
-                        }}
-                        className="bg-brand hover:bg-brand/90 gap-1.5"
-                      >
-                        Done Uploads — Continue <ArrowRight className="size-4" />
-                      </Button>
-                    </div>
-
-                    {/* Confirmation Dialog: Proceed with Incomplete Documents */}
-                    <Dialog open={showMissingDocsConfirmDialog} onOpenChange={setShowMissingDocsConfirmDialog}>
-                      <DialogContent className="sm:max-w-md">
-                        <DialogHeader>
-                          <DialogTitle className="flex items-center gap-2 text-amber-600 text-base">
-                            <FileWarning className="size-5" />
-                            Proceed with Incomplete Documents?
-                          </DialogTitle>
-                        </DialogHeader>
-
-                        <div className="space-y-3 py-2 text-xs text-muted-foreground">
-                          <p>
-                            The following mandatory document(s) have not been uploaded yet:
-                          </p>
-                          <div className="flex flex-wrap gap-1.5">
-                            {missingDocsList.map((doc, i) => (
-                              <span
-                                key={i}
-                                className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-800 dark:text-amber-200 font-semibold text-[11px]"
-                              >
-                                {doc}
-                              </span>
-                            ))}
                           </div>
-                          <p className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300">
-                            If you continue without uploading these documents, your application draft will be generated with <strong>"Review Required"</strong> flags for missing proof and will require manual departmental review.
-                          </p>
-                        </div>
-
-                        <div className="flex items-center justify-end gap-2 pt-3 border-t border-line">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setShowMissingDocsConfirmDialog(false)}
-                          >
-                            Upload Remaining Docs
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="bg-brand hover:bg-brand/90 gap-1"
-                            onClick={() => handleResumeWorkflow(true)}
-                          >
-                            Proceed Anyway <ArrowRight className="size-3.5" />
-                          </Button>
-                        </div>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
-                ) : candidateSchemes.length > 0 ? (
-                  /* 3. Discovered Candidate Schemes list */
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-xl font-display font-semibold">
-                        {t("assistant.matchedSchemes", "Discovered Matching Schemes")}
-                      </h2>
-                      <span className="text-xs bg-brand/10 text-brand px-3 py-1 rounded-full font-medium">
-                        Verified Catalog
-                      </span>
+                        ))}
+                      </div>
                     </div>
-
-                    <div className="grid gap-4">
-                      {candidateSchemes.map((scheme) => (
-                        <div
-                          key={scheme.id}
-                          className="rounded-xl border border-line bg-card p-5 hover:border-brand/40 transition-colors shadow-none"
-                        >
-                          <div className="flex justify-between items-start mb-3">
-                            <div>
-                              <span className="text-[11px] font-semibold uppercase tracking-wider text-brand-soft">
-                                {scheme.category}
-                              </span>
-                              <h3 className="font-semibold text-lg flex items-center gap-2 mt-0.5">
-                                {scheme.name}
-                                {scheme.official && <CheckCircle2 className="size-4 text-brand" />}
-                              </h3>
-                              <p className="text-brand font-medium text-sm mt-1">{scheme.benefit}</p>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-xl font-bold font-display text-sage">
-                                {scheme.matchScore}%
-                              </div>
-                              <div className="text-[11px] text-muted-foreground">Match</div>
-                            </div>
+                  ) : (
+                    /* 4. Skeleton Loader State while searching / orchestrating */
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <Skeleton className="h-6 w-48" />
+                        <Skeleton className="h-5 w-24 rounded-full" />
+                      </div>
+                      <div className="p-5 rounded-xl border border-line bg-card space-y-4">
+                        <div className="flex justify-between items-start">
+                          <div className="space-y-2">
+                            <Skeleton className="h-4 w-24" />
+                            <Skeleton className="h-6 w-64" />
+                            <Skeleton className="h-4 w-36" />
                           </div>
-
-                          <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
-                            {scheme.description}
-                          </p>
-
-                          <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-line">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-xs text-brand hover:bg-brand/5 p-0 h-auto font-medium"
-                              onClick={() => setSelectedScheme(scheme)}
-                            >
-                              {t("assistant.viewEligibility", "View Eligibility Breakdown")}{" "}
-                              <ChevronRight className="size-3.5 ml-0.5" />
-                            </Button>
-
-                            <Button
-                              size="sm"
-                              onClick={() =>
-                                navigate({ to: "/documents", search: { scheme: scheme.id } })
-                              }
-                            >
-                              {t("assistant.startApplication", {
-                                docCount: scheme.reqDocs?.length || 3,
-                              })}
-                              <ArrowRight className="size-3.5 ml-1.5" />
-                            </Button>
+                          <Skeleton className="h-10 w-16" />
+                        </div>
+                        <Skeleton className="h-12 w-full" />
+                        <div className="flex justify-between pt-3 border-t border-line">
+                          <Skeleton className="h-8 w-32" />
+                          <Skeleton className="h-8 w-40" />
+                        </div>
+                      </div>
+                      <div className="p-5 rounded-xl border border-line bg-card space-y-4">
+                        <div className="flex justify-between items-start">
+                          <div className="space-y-2">
+                            <Skeleton className="h-4 w-24" />
+                            <Skeleton className="h-6 w-56" />
+                            <Skeleton className="h-4 w-32" />
                           </div>
+                          <Skeleton className="h-10 w-16" />
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  /* 4. Skeleton Loader State while searching / orchestrating */
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <Skeleton className="h-6 w-48" />
-                      <Skeleton className="h-5 w-24 rounded-full" />
-                    </div>
-                    <div className="p-5 rounded-xl border border-line bg-card space-y-4">
-                      <div className="flex justify-between items-start">
-                        <div className="space-y-2">
-                          <Skeleton className="h-4 w-24" />
-                          <Skeleton className="h-6 w-64" />
-                          <Skeleton className="h-4 w-36" />
-                        </div>
-                        <Skeleton className="h-10 w-16" />
-                      </div>
-                      <Skeleton className="h-12 w-full" />
-                      <div className="flex justify-between pt-3 border-t border-line">
-                        <Skeleton className="h-8 w-32" />
-                        <Skeleton className="h-8 w-40" />
+                        <Skeleton className="h-12 w-full" />
                       </div>
                     </div>
-                    <div className="p-5 rounded-xl border border-line bg-card space-y-4">
-                      <div className="flex justify-between items-start">
-                        <div className="space-y-2">
-                          <Skeleton className="h-4 w-24" />
-                          <Skeleton className="h-6 w-56" />
-                          <Skeleton className="h-4 w-32" />
-                        </div>
-                        <Skeleton className="h-10 w-16" />
-                      </div>
-                      <Skeleton className="h-12 w-full" />
-                    </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-            </div>
-          )}
-        </main>
-      </div>
+            )}
+          </main>
+        </div>
 
         {/* Scheme Eligibility Breakdown Dialog */}
         <Dialog open={!!selectedScheme} onOpenChange={() => setSelectedScheme(null)}>
@@ -2038,15 +2025,14 @@ export function AssistantPage() {
                             "{r.query}"
                           </p>
                           <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
-                              isDone
-                                ? "bg-sage/15 text-sage"
-                                : isAction
-                                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-                                  : isProc
-                                    ? "bg-brand/15 text-brand"
-                                    : "bg-muted text-muted-foreground"
-                            }`}
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${isDone
+                              ? "bg-sage/15 text-sage"
+                              : isAction
+                                ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                                : isProc
+                                  ? "bg-brand/15 text-brand"
+                                  : "bg-muted text-muted-foreground"
+                              }`}
                           >
                             {isDone
                               ? "Draft Ready"

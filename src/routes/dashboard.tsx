@@ -167,13 +167,22 @@ function DashboardPage() {
     };
   }, []);
 
-  // Time of day greeting
-  const hour = new Date().getHours();
+  // Time of day greeting according to Indian Standard Time (IST) system
+  // Morning: 04:00 - 11:59 | Afternoon: 12:00 - 16:59 | Evening: 17:00 - 03:59
+  const istHour = (() => {
+    try {
+      const istString = new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", hour12: false });
+      return new Date(istString).getHours();
+    } catch {
+      return new Date().getHours();
+    }
+  })();
+
   const firstName = profile?.full_name?.split(" ")[0] || t("dashboard.citizenDefault", "Citizen");
   const greetingText =
-    hour < 12
+    istHour >= 4 && istHour < 12
       ? t("dashboard.greetingMorning", { name: firstName })
-      : hour < 17
+      : istHour >= 12 && istHour < 17
         ? t("dashboard.greetingAfternoon", { name: firstName })
         : t("dashboard.greetingEvening", { name: firstName });
 

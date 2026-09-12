@@ -461,7 +461,7 @@ export async function reviewApplication(
           title: `Application ${action.toUpperCase()}: ${appRow.tracking_id}`,
           body: notes.trim(),
           type: action === "approved" ? "success" : "critical",
-          read: false,
+          is_read: false,
         });
       }
 

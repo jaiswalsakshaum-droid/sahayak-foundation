@@ -290,7 +290,7 @@ function AdminAgentsControlCenter() {
               No recent agent events. Trigger an assistant query or upload a document to view real-time operations.
             </p>
           ) : (
-            <div className="max-h-96 overflow-y-auto space-y-2 pr-1 divide-y divide-slate-800/40">
+            <div className="max-h-96 overflow-y-auto space-y-2 pr-1 divide-y divide-slate-800/40 scrollbar-none">
               {events.map((e) => {
                 const styling = AGENT_COLORS[e.agent_name?.toLowerCase().replace(" agent", "")] || {
                   badge: "bg-slate-800 text-slate-300 border-slate-700",
