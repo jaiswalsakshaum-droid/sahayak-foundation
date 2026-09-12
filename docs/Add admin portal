@@ -1,0 +1,88 @@
+Add Admin Portal + Remove Workspace Section from Citizen Sidebar (No Mock Data)
+Context
+
+Sahayak currently has a citizen-facing sidebar with a "WORKSPACE" section containing "AI Workforce" and "Admin" links. We need to separate concerns: citizens should never see admin-related navigation, and admins should have their own dedicated login and dashboard backed entirely by real backend data — no mock/dummy/hardcoded values anywhere in the admin UI.
+
+Hard constraint: do not modify, refactor, or break any existing citizen-facing functionality, routes, components, or styles beyond the specific sidebar removal described below.
+
+Task 1 — Remove "WORKSPACE" Section from Citizen Sidebar
+Locate the sidebar component rendering the "WORKSPACE" group (containing "AI Workforce" and "Admin" nav items — visible in the attached screenshot).
+Remove this entire section (the header label "WORKSPACE" and both child items) from the citizen-facing sidebar only.
+Do not delete the underlying /admin, /admin/agents, /admin/schemes, /admin/analytics routes or their components — just remove the citizen's visual/navigational access to them.
+Verify the citizen sidebar still renders correctly with proper spacing after removal (no leftover empty containers/margins).
+Confirm citizens cannot reach /admin/* routes directly either — add a route guard so that if a citizen (non-admin role) manually navigates to any /admin/* URL, they're redirected (e.g., to their citizen dashboard or a 403 page), not just visually hidden.
+Task 2 — Separate Admin Login Window
+Create a new, distinct login page for admins at a separate route (e.g., /admin/login), completely separate from the citizen login flow.
+This should NOT reuse the citizen login UI/branding as-is — differentiate it visually (e.g., "Sahayak Admin Console" branding) so it's clearly not the citizen portal.
+Backend: add/confirm a role field on the user/account model (citizen vs admin, and optionally super_admin if you want tiered permissions).
+Auth flow:
+Admin login authenticates against the same backend but checks role === admin.
+On success, issue a session/token scoped with admin claims.
+Reject citizen credentials attempting to log in via /admin/login with a clear error (don't leak whether the email exists).
+Reject admin tokens from accessing citizen-only endpoints and vice versa (proper RBAC middleware on the backend, not just frontend hiding).
+Add logout, session expiry, and "forgot password" handling consistent with whatever the citizen side already has (reuse the underlying auth service, not the UI).
+Task 3 — Admin Panel Features (Real Backend Data Only)
+
+No feature below should render mock arrays, hardcoded numbers, or placeholder text as if they were live data. If a backend endpoint doesn't exist yet, build it — don't fake the frontend and leave it for later.
+
+3.1 Control Center (/admin)
+
+Live metrics pulled from backend aggregation queries:
+
+Active Citizens (count of currently active/logged-in or recently active users)
+Applications (total, and breakdown by status: submitted / in-progress / approved / rejected)
+Documents Verified (count from document verification service)
+Agent Tasks (count of tasks processed/queued by AI agents)
+Average Workflow Time (computed from timestamps: application start → completion)
+Applications Needing Review (count of items flagged for human intervention)
+
+Each metric card should link through to a filtered detail view (e.g., clicking "Applications Needing Review" takes you to the Review Queue).
+
+3.2 Human Supervisory Review Queue
+A queue view listing applications/cases flagged as requiring human verification before final sanction.
+Each entry shows: citizen ID/name, scheme applied for, what the AI agents did (research/compare/verify/prepare summary), why it's flagged, and documents attached.
+Admin actions: Approve / Reject / Request more info, each requiring a mandatory reason field.
+Every decision must be persisted and written to an audit log (who approved/rejected, when, why, previous state → new state).
+Add pagination/filtering (by scheme, by date, by priority/urgency) since this queue will grow.
+3.3 AI Workforce Control Center (/admin/agents)
+Live view of all agents (Scheme Agent, Eligibility Agent, Document Agent, Application Agent, Tracker Agent, Citizen Agent) with real status (Active/Idle/Error) pulled from your orchestration/agent service — not a static "ACTIVE" label.
+Live Activity Stream: a real-time (polling or websocket) feed of agent actions across all citizens currently being served, e.g. "Document Agent verified Aadhaar for Citizen #123."
+Per-agent drill-down: task count, average processing time, error/failure rate, last active timestamp.
+If any agent is down/erroring, surface this clearly (status badge + alert).
+3.4 Schemes Management (/admin/schemes)
+List/search/filter all schemes in the knowledge base (from your schemes DB/table, not a static JSON).
+View scheme details (eligibility rules, documents required, benefit description).
+Change scheme status: Active / Draft / Archived — this update must persist to the backend and immediately affect what the AI agents are allowed to recommend to citizens (i.e., archived schemes should be excluded from agent recommendations in real time).
+Add create/edit capability for schemes if not already present (so admins can add new government schemes without a code deploy).
+Track scheme edit history (who changed what, when) for auditability.
+3.5 Analytics (/admin/analytics)
+
+All charts/numbers driven by real analytics service queries:
+
+Applications by stage (funnel view)
+Document volume over time
+Agent task distribution (which agents are doing the most work)
+Completion rate (% of applications that reach final approval)
+Workflow metrics / bottleneck detection (which stage has the longest average dwell time)
+Time-range filters (last 7/30/90 days, custom range)
+Export to CSV/PDF for reporting purposes
+3.6 Additional Features Worth Adding (recommended, not just from the doc)
+Admin/User Management: list of admin accounts, ability for a super_admin to create/deactivate other admin accounts, with role assignment.
+Citizen Account Lookup: search a citizen by ID/name/phone to view their full application history and current status (support/troubleshooting use case).
+Audit Log Viewer: a searchable, filterable log of all admin actions (approvals, rejections, scheme status changes, admin logins) — this is critical for the "human-in-the-loop" trust story.
+System Health/Alerts: backend service status (API uptime, DB connection, agent orchestration health), with alerting if something's degraded.
+Notification Center: surfaces urgent items needing admin attention (e.g., a spike in flagged applications, an agent repeatedly failing).
+Role-based permission settings: control which admin roles can approve/reject vs. only view analytics (if you want tiered admin access).
+Task 4 — Backend Requirements
+For every metric/list/chart above, confirm there's a real API endpoint returning live data from the database — if missing, create it.
+Add proper pagination, filtering, and sorting query params on list endpoints (applications, schemes, audit logs) rather than dumping everything client-side.
+Add authentication middleware so all /api/admin/* endpoints require a valid admin-role token — no admin data should be fetchable with a citizen token.
+Add audit logging as a first-class backend concern (a dedicated audit_logs table/collection) rather than something bolted onto individual actions inconsistently.
+Task 5 — Acceptance Criteria
+ Citizen sidebar no longer shows "WORKSPACE" / "AI Workforce" / "Admin" — citizen portal otherwise unchanged and fully functional.
+ Citizens cannot access /admin/* routes even via direct URL.
+ A separate, working /admin/login exists with its own auth check.
+ Every number, list, chart, and status shown in the admin panel is fetched from a real backend endpoint — zero hardcoded/mock data anywhere in the admin UI.
+ Approve/reject actions in the Review Queue persist to the DB and write an audit log entry.
+ Scheme status changes persist and affect agent behavior immediately.
+ No existing citizen-facing code, routes, or styles are broken as a result of these changes.

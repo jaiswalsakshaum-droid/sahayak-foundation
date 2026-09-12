@@ -137,22 +137,102 @@ export async function requireAuth() {
 
 /**
  * Centralized Route Guard: Requires admin role for /admin/* routes.
- * Also SSR-safe — skips on the server, fires on the client after hydration.
+ * Redirects unauthenticated users to /admin/login and non-admin citizens to /dashboard.
  */
 export async function requireAdmin() {
   // Skip auth enforcement during SSR — localStorage is unavailable.
   if (typeof window === "undefined") return null;
 
-  const session = await requireAuth();
-  const profile = await getCurrentProfile();
+  const session = await getSession();
+  if (!session) {
+    throw redirect({
+      to: "/admin/login",
+    });
+  }
 
+  const profile = await getCurrentProfile();
   if (!profile || profile.role !== "admin") {
-    // If not admin, redirect to citizen dashboard
     throw redirect({
       to: "/dashboard",
     });
   }
   return { session, profile };
+}
+
+/**
+ * Dedicated Admin Sign-In: strictly enforces role === 'admin'
+ */
+export async function adminSignIn(
+  emailOrIdentifier: string,
+  password: string,
+): Promise<{ success: boolean; error?: string; profile?: UserProfile }> {
+  const cleanEmail = emailOrIdentifier.trim();
+
+  if (!isSupabaseConfigured) {
+    if (cleanEmail === "admin" && (password === "admin" || password === "1234")) {
+      if (typeof window !== "undefined") {
+        localStorage.setItem("sahayak_auth", "true");
+        localStorage.setItem("sahayak_role", "admin");
+      }
+      return { success: true, profile: { ...LOCAL_DEMO_PROFILE, role: "admin", full_name: "Admin Officer" } };
+    }
+    return {
+      success: false,
+      error: "Access denied: Invalid credentials or account does not have administrative privileges.",
+    };
+  }
+
+  try {
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password,
+    });
+
+    if (signInError || !signInData.session) {
+      return {
+        success: false,
+        error: "Access denied: Invalid credentials or account does not have administrative privileges.",
+      };
+    }
+
+    // Verify role in profiles table
+    const { data: profileData, error: profileError } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", signInData.session.user.id)
+      .single();
+
+    if (profileError || !profileData || profileData.role !== "admin") {
+      // Revert session immediately to prevent unauthorized access
+      await supabase.auth.signOut();
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("sahayak_auth");
+        localStorage.removeItem("sahayak_role");
+      }
+      return {
+        success: false,
+        error: "Access denied: Citizen accounts cannot access the administrative portal.",
+      };
+    }
+
+    if (typeof window !== "undefined") {
+      localStorage.setItem("sahayak_auth", "true");
+      localStorage.setItem("sahayak_role", "admin");
+    }
+
+    return {
+      success: true,
+      profile: {
+        ...profileData,
+        email: signInData.session.user.email,
+      },
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || "An unexpected authentication error occurred.",
+    };
+  }
 }
 
 /**

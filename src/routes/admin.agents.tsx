@@ -1,571 +1,329 @@
-import { createFileRoute, Link, redirect } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bot,
   ShieldCheck,
   SearchCheck,
   ClipboardCheck,
   FileCheck2,
-  FileText,
-  Landmark,
   Activity,
+  AlertTriangle,
+  RefreshCw,
+  Loader2,
+  CheckCircle2,
+  Clock,
   Zap,
-  ArrowRight,
-  ArrowDown,
-  ArrowLeft,
-  X,
-  Lock,
-  FileKey,
+  Radio,
+  FileText,
+  AlertCircle,
+  Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { requireAdmin } from "@/lib/auth";
+import { AdminLayout } from "@/components/admin/AdminLayout";
+import {
+  getLiveWorkforceStatus,
+  getLiveAgentEvents,
+  type AgentWorkforceMember,
+  type RealAgentEvent,
+} from "@/lib/admin-services";
 
 export const Route = createFileRoute("/admin/agents")({
   beforeLoad: async () => {
     await requireAdmin();
   },
-  component: AdminAgentsPage,
+  head: () => ({
+    meta: [
+      { title: "AI Workforce Control Center — Sahayak Admin" },
+      {
+        name: "description",
+        content: "Real-time supervisory control, event stream, and health telemetry for the 6 specialized AI agents.",
+      },
+    ],
+  }),
+  component: AdminAgentsControlCenter,
 });
 
-const AGENTS_DATA = [
-  {
-    id: "citizen",
-    name: "Citizen Agent",
-    role: "Understands citizen intent and context",
-    status: "ONLINE",
-    task: "Awaiting input",
-    input: "Natural language query",
-    output: "Structured intent & profile",
-    lastActive: "Just now",
-    confidence: "98%",
-    icon: ShieldCheck,
-    color: "text-blue-600",
-    bg: "bg-blue-100",
-    border: "border-blue-200",
-  },
-  {
-    id: "scheme",
-    name: "Scheme Agent",
-    role: "Retrieves potentially relevant schemes",
-    status: "PROCESSING",
-    task: "Querying knowledge base",
-    input: "Citizen intent",
-    output: "Candidate schemes list",
-    lastActive: "2s ago",
-    confidence: "94%",
-    icon: SearchCheck,
-    color: "text-indigo-600",
-    bg: "bg-indigo-100",
-    border: "border-indigo-200",
-  },
-  {
-    id: "eligibility",
-    name: "Eligibility Agent",
-    role: "Evaluates structured eligibility criteria",
-    status: "WAITING",
-    task: "Idle",
-    input: "Citizen profile & Scheme criteria",
-    output: "Eligibility result & Missing requirements",
-    lastActive: "1m ago",
-    confidence: "99%",
-    icon: ClipboardCheck,
-    color: "text-emerald-600",
-    bg: "bg-emerald-100",
-    border: "border-emerald-200",
-  },
-  {
-    id: "document",
-    name: "Document Agent",
-    role: "Validates supporting documents",
-    status: "ACTION REQUIRED",
-    task: "Waiting for Income Certificate",
-    input: "Uploaded file",
-    output: "Extracted fields & validation score",
-    lastActive: "5m ago",
-    confidence: "96%",
-    icon: FileCheck2,
-    color: "text-amber-600",
-    bg: "bg-amber-100",
-    border: "border-amber-200",
-  },
-  {
-    id: "application",
-    name: "Application Agent",
-    role: "Prepares applications",
-    status: "COMPLETED",
-    task: "Draft generated",
-    input: "Verified eligibility & docs",
-    output: "Application draft payload",
-    lastActive: "10m ago",
-    confidence: "99%",
-    icon: FileText,
-    color: "text-purple-600",
-    bg: "bg-purple-100",
-    border: "border-purple-200",
-  },
-  {
-    id: "tracker",
-    name: "Tracker Agent",
-    role: "Monitors progress and identifies next actions",
-    status: "ONLINE",
-    task: "Monitoring active submissions",
-    input: "Government portal status",
-    output: "Actionable notifications",
-    lastActive: "1hr ago",
-    confidence: "100%",
-    icon: Landmark,
-    color: "text-rose-600",
-    bg: "bg-rose-100",
-    border: "border-rose-200",
-  },
-];
+const AGENT_ICONS: Record<string, any> = {
+  citizen: ShieldCheck,
+  scheme: SearchCheck,
+  eligibility: ClipboardCheck,
+  document: FileCheck2,
+  application: FileText,
+  tracker: Clock,
+};
 
-import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { getRecentAgentEvents } from "@/lib/admin-services";
+const AGENT_COLORS: Record<string, { badge: string; iconBg: string; text: string }> = {
+  citizen: { badge: "bg-blue-950 text-blue-300 border-blue-800", iconBg: "bg-blue-500/10 text-blue-400 border-blue-500/20", text: "text-blue-400" },
+  scheme: { badge: "bg-indigo-950 text-indigo-300 border-indigo-800", iconBg: "bg-indigo-500/10 text-indigo-400 border-indigo-500/20", text: "text-indigo-400" },
+  eligibility: { badge: "bg-emerald-950 text-emerald-300 border-emerald-800", iconBg: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", text: "text-emerald-400" },
+  document: { badge: "bg-amber-950 text-amber-300 border-amber-800", iconBg: "bg-amber-500/10 text-amber-400 border-amber-500/20", text: "text-amber-400" },
+  application: { badge: "bg-purple-950 text-purple-300 border-purple-800", iconBg: "bg-purple-500/10 text-purple-400 border-purple-500/20", text: "text-purple-400" },
+  tracker: { badge: "bg-cyan-950 text-cyan-300 border-cyan-800", iconBg: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20", text: "text-cyan-400" },
+};
 
-function AdminAgentsPage() {
-  const [selectedAgent, setSelectedAgent] = useState<(typeof AGENTS_DATA)[0] | null>(null);
-  const [events, setEvents] = useState<any[]>([]);
+function AdminAgentsControlCenter() {
+  const queryClient = useQueryClient();
+  const [selectedAgent, setSelectedAgent] = useState<AgentWorkforceMember | null>(null);
 
-  // Load initial events and subscribe to live agent_events across all runs
-  useEffect(() => {
-    let isMounted = true;
+  // Queries
+  const agentsQuery = useQuery({
+    queryKey: ["admin", "agents", "status"],
+    queryFn: getLiveWorkforceStatus,
+    refetchInterval: 5000,
+  });
 
-    async function loadEvents() {
-      const initial = await getRecentAgentEvents();
-      if (isMounted) setEvents(initial);
-    }
-    loadEvents();
+  const eventsQuery = useQuery({
+    queryKey: ["admin", "agents", "events"],
+    queryFn: () => getLiveAgentEvents(40),
+    refetchInterval: 3000,
+  });
 
-    if (isSupabaseConfigured) {
-      const channel = supabase
-        .channel("admin_agent_events")
-        .on(
-          "postgres_changes",
-          { event: "INSERT", schema: "public", table: "agent_events" },
-          (payload) => {
-            const row = payload.new as any;
-            const newEv = {
-              id: row.id,
-              run_id: row.run_id,
-              timestamp: new Date(row.created_at || Date.now()).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-              }),
-              agent: row.agent_name,
-              action: row.action,
-            };
-            setEvents((prev) => [newEv, ...prev]);
-          },
-        )
-        .subscribe();
+  const agents = agentsQuery.data || [];
+  const events = eventsQuery.data || [];
 
-      return () => {
-        isMounted = false;
-        supabase.removeChannel(channel);
-      };
-    }
-  }, []);
+  const totalTasks = agents.reduce((acc, a) => acc + a.tasks_processed, 0);
+  const totalErrors = agents.reduce((acc, a) => acc + a.error_count, 0);
+  const isAnyAgentInError = agents.some((a) => a.status === "ERROR");
 
   return (
-    <div className="min-h-screen bg-ice-2 text-foreground flex flex-col overflow-hidden">
-      <header className="sticky top-0 z-30 border-b border-line bg-ice-2/90 backdrop-blur-sm">
-        <div className="mx-auto flex h-16 w-full items-center px-5">
-          <Link to="/" className="flex items-center gap-2 mr-8 text-foreground hover:text-brand">
-            <span className="grid size-8 place-items-center rounded-lg bg-slate-900 font-display text-sm font-semibold text-white">
-              S
-            </span>
-            <span className="font-display font-semibold hidden sm:block">Sahayak Admin</span>
-          </Link>
-          <nav className="flex items-center gap-6 text-sm font-medium">
-            <Link to="/admin" className="text-muted-foreground hover:text-foreground">
-              Overview
-            </Link>
-            <Link to="/admin/agents" className="text-foreground">
-              AI Workforce
-            </Link>
-            <Link to="/admin/schemes" className="text-muted-foreground hover:text-foreground">
-              Knowledge Base
-            </Link>
-          </nav>
-          <div className="ml-auto flex items-center gap-3">
-            <Button asChild size="sm" variant="ghost" className="text-xs text-muted-foreground hover:text-foreground">
-              <Link to="/dashboard" className="gap-1.5 flex items-center">
-                <ArrowLeft className="size-3.5" />
-                <span>Dashboard</span>
-              </Link>
+    <AdminLayout
+      title="AI Workforce Control Center"
+      subtitle="Autonomous Multi-Agent telemetry, deterministic pipeline health, and live multi-citizen activity feed."
+    >
+      <div className="space-y-8">
+        {/* System Alert Banner if Error */}
+        {isAnyAgentInError && (
+          <div className="flex items-center gap-3 rounded-xl border border-rose-500/40 bg-rose-950/30 p-4 text-rose-200">
+            <AlertTriangle className="size-5 shrink-0 text-rose-400" />
+            <div className="text-xs">
+              <span className="font-bold">Workforce Alert:</span> One or more agents encountered a processing failure or missing credential. Check the activity stream below for execution traces.
+            </div>
+          </div>
+        )}
+
+        {/* Global Workforce Telemetry Stats */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+            <div className="flex items-center justify-between text-slate-400 mb-2">
+              <span className="text-xs font-medium uppercase tracking-wider">Workforce Roster</span>
+              <Bot className="size-4 text-brand" />
+            </div>
+            <p className="text-2xl font-bold font-display text-white">6 Agents</p>
+            <p className="text-[11px] text-slate-400 mt-1">Specialized civic sub-graphs</p>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+            <div className="flex items-center justify-between text-slate-400 mb-2">
+              <span className="text-xs font-medium uppercase tracking-wider">Total Tasks Executed</span>
+              <Zap className="size-4 text-amber-400" />
+            </div>
+            <p className="text-2xl font-bold font-display text-white">
+              {agentsQuery.isLoading ? "—" : totalTasks.toLocaleString()}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">Live database events</p>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+            <div className="flex items-center justify-between text-slate-400 mb-2">
+              <span className="text-xs font-medium uppercase tracking-wider">Workforce Health</span>
+              <Activity className="size-4 text-emerald-400" />
+            </div>
+            <p className="text-2xl font-bold font-display text-emerald-300">
+              {agentsQuery.isLoading ? "—" : `${Math.max(0, 100 - (totalErrors / Math.max(1, totalTasks)) * 100).toFixed(1)}%`}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">Operational success rate</p>
+          </div>
+
+          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+            <div className="flex items-center justify-between text-slate-400 mb-2">
+              <span className="text-xs font-medium uppercase tracking-wider">Live Activity Pulse</span>
+              <Radio className="size-4 text-rose-400 animate-pulse" />
+            </div>
+            <p className="text-2xl font-bold font-display text-white">{events.length} Events</p>
+            <p className="text-[11px] text-slate-400 mt-1">Streaming in real-time (3s poll)</p>
+          </div>
+        </div>
+
+        {/* 6 Specialized Agent Cards */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold font-display text-white flex items-center gap-2">
+              <Bot className="size-5 text-brand" />
+              Specialized Agent Pipeline Roster
+            </h2>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                queryClient.invalidateQueries({ queryKey: ["admin", "agents"] });
+              }}
+              className="border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 h-8 text-xs"
+            >
+              <RefreshCw className={`size-3.5 mr-1.5 ${agentsQuery.isRefetching ? "animate-spin" : ""}`} />
+              Poll Telemetry
             </Button>
           </div>
-        </div>
-      </header>
 
-      <main className="flex-1 w-full px-5 py-8 mx-auto max-w-[1400px] grid grid-cols-1 xl:grid-cols-12 gap-8 relative">
-        {/* LEFT COLUMN: Workforce Graph & Trust Center */}
-        <div className="xl:col-span-3 space-y-8">
-          <div className="bg-card rounded-xl border border-line p-5 shadow-sm">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="font-semibold text-sm uppercase tracking-wider text-muted-foreground">
-                Collaboration Flow
+          {agentsQuery.isLoading ? (
+            <div className="flex flex-col items-center justify-center py-12 text-slate-400 space-y-2">
+              <Loader2 className="size-7 animate-spin text-brand" />
+              <p className="text-xs">Computing live agent workforce telemetry...</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {agents.map((agent) => {
+                const IconComponent = AGENT_ICONS[agent.id] || Bot;
+                const styling = AGENT_COLORS[agent.id] || {
+                  badge: "bg-slate-800 text-slate-300 border-slate-700",
+                  iconBg: "bg-slate-800 text-slate-300 border-slate-700",
+                  text: "text-slate-300",
+                };
+
+                return (
+                  <div
+                    key={agent.id}
+                    className="rounded-xl border border-slate-800 bg-slate-900/70 p-5 shadow-sm hover:border-slate-700 transition-all space-y-4 flex flex-col justify-between"
+                  >
+                    <div>
+                      {/* Top Header */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className={`flex size-10 items-center justify-center rounded-xl border ${styling.iconBg}`}>
+                            <IconComponent className="size-5" />
+                          </div>
+                          <div>
+                            <h3 className="text-sm font-bold text-white">{agent.name}</h3>
+                            <p className="text-[11px] text-slate-400">{agent.role}</p>
+                          </div>
+                        </div>
+
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold border uppercase tracking-wider flex items-center gap-1 ${
+                            agent.status === "ERROR"
+                              ? "bg-rose-950 text-rose-300 border-rose-800"
+                              : agent.status === "ONLINE"
+                              ? "bg-emerald-950 text-emerald-300 border-emerald-800"
+                              : "bg-slate-800 text-slate-400 border-slate-700"
+                          }`}
+                        >
+                          <span
+                            className={`size-1.5 rounded-full ${
+                              agent.status === "ONLINE"
+                                ? "bg-emerald-400 animate-pulse"
+                                : agent.status === "ERROR"
+                                ? "bg-rose-400"
+                                : "bg-slate-500"
+                            }`}
+                          />
+                          {agent.status}
+                        </span>
+                      </div>
+
+                      {/* Execution Statistics */}
+                      <div className="grid grid-cols-3 gap-2 py-3 border-y border-slate-800/80 my-3 text-center">
+                        <div>
+                          <p className="text-[10px] text-slate-400 uppercase tracking-wider">Tasks</p>
+                          <p className="text-sm font-bold text-white mt-0.5 font-display">
+                            {agent.tasks_processed}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-slate-400 uppercase tracking-wider">Error Rate</p>
+                          <p className="text-sm font-bold text-slate-200 mt-0.5 font-display">
+                            {agent.error_rate}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-slate-400 uppercase tracking-wider">Last Active</p>
+                          <p className="text-xs font-semibold text-slate-300 mt-0.5">
+                            {agent.last_active
+                              ? new Date(agent.last_active).toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })
+                              : "Idle"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Last Event / Action */}
+                      <div className="text-xs text-slate-400 space-y-1">
+                        <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">
+                          Recent Operation
+                        </span>
+                        <p className="text-slate-200 text-xs truncate bg-slate-950/60 rounded px-2.5 py-1.5 border border-slate-800/80 font-mono">
+                          {agent.last_action}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Live Activity Stream Feed */}
+        <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2.5">
+              <Radio className="size-4 text-emerald-400 animate-pulse" />
+              <h3 className="text-sm font-bold text-white font-display">
+                Real-Time Multi-Citizen Event Stream
               </h3>
-              <span className="inline-flex items-center gap-1.5 text-xs text-sage font-medium">
-                <span className="size-2 rounded-full bg-sage animate-pulse" /> Live Realtime
+              <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-slate-300 font-mono">
+                LIVE
               </span>
             </div>
-
-            <div className="flex flex-col items-center">
-              <FlowBox label="Citizen" />
-              <FlowArrow />
-
-              <FlowBox
-                label="Citizen Agent"
-                agentId="citizen"
-                onClick={() => setSelectedAgent(AGENTS_DATA[0])}
-              />
-              <FlowArrow />
-
-              <FlowBox
-                label="Scheme Agent"
-                agentId="scheme"
-                onClick={() => setSelectedAgent(AGENTS_DATA[1])}
-              />
-              <FlowArrow />
-
-              <FlowBox
-                label="Eligibility Agent"
-                agentId="eligibility"
-                onClick={() => setSelectedAgent(AGENTS_DATA[2])}
-              />
-              <FlowArrow />
-
-              <FlowBox
-                label="Document Agent"
-                agentId="document"
-                onClick={() => setSelectedAgent(AGENTS_DATA[3])}
-              />
-              <FlowArrow />
-
-              <FlowBox
-                label="Eligibility Agent"
-                agentId="eligibility"
-                onClick={() => setSelectedAgent(AGENTS_DATA[2])}
-              />
-              <FlowArrow />
-
-              <FlowBox
-                label="Application Agent"
-                agentId="application"
-                onClick={() => setSelectedAgent(AGENTS_DATA[4])}
-              />
-              <FlowArrow />
-
-              <FlowBox label="Human Approval" highlight />
-              <FlowArrow />
-
-              <FlowBox label="Government Portal" />
-              <FlowArrow />
-
-              <FlowBox
-                label="Tracker Agent"
-                agentId="tracker"
-                onClick={() => setSelectedAgent(AGENTS_DATA[5])}
-              />
-              <FlowArrow />
-
-              <FlowBox label="Citizen" />
-            </div>
+            <span className="text-xs text-slate-400">Showing recent agent actions executed in LangGraph backend</span>
           </div>
 
-          <div className="bg-brand text-primary-foreground rounded-xl p-5 shadow-sm">
-            <div className="flex items-center gap-2 mb-3">
-              <Lock className="size-5" />
-              <h3 className="font-semibold">Trust & Safety</h3>
+          {eventsQuery.isLoading ? (
+            <div className="flex items-center justify-center py-8 text-slate-400">
+              <Loader2 className="size-5 animate-spin text-brand mr-2" />
+              <span className="text-xs">Streaming events from database...</span>
             </div>
-            <p className="text-sm text-primary-foreground/80 mb-4 border-b border-primary-foreground/20 pb-4">
-              "Your data stays under your control"
+          ) : events.length === 0 ? (
+            <p className="text-xs text-slate-500 py-6 text-center">
+              No recent agent events. Trigger an assistant query or upload a document to view real-time operations.
             </p>
+          ) : (
+            <div className="max-h-96 overflow-y-auto space-y-2 pr-1 divide-y divide-slate-800/40">
+              {events.map((e) => {
+                const styling = AGENT_COLORS[e.agent_name?.toLowerCase().replace(" agent", "")] || {
+                  badge: "bg-slate-800 text-slate-300 border-slate-700",
+                  text: "text-slate-300",
+                };
 
-            <div className="space-y-4 text-xs">
-              <div>
-                <p className="font-semibold uppercase tracking-wider text-primary-foreground/60 mb-2">
-                  AI Can
-                </p>
-                <ul className="space-y-1 pl-4 list-disc marker:text-primary-foreground/50">
-                  <li>Research & Compare</li>
-                  <li>Verify & Validate</li>
-                  <li>Prepare drafts</li>
-                  <li>Monitor status</li>
-                </ul>
-              </div>
-              <div>
-                <p className="font-semibold uppercase tracking-wider text-primary-foreground/60 mb-2">
-                  AI Cannot Do Without You
-                </p>
-                <ul className="space-y-1 pl-4 list-disc marker:text-amber-300">
-                  <li>Submit applications</li>
-                  <li>Share sensitive documents</li>
-                  <li>Authorize official actions</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* MIDDLE COLUMN: Agent Cards */}
-        <div className="xl:col-span-6 space-y-6">
-          <div>
-            <h1 className="text-3xl font-display font-semibold mb-2">
-              AI Workforce Control Center
-            </h1>
-            <p className="text-muted-foreground">
-              Manage and monitor specialized agents in the Sahayak ecosystem.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {AGENTS_DATA.map((agent) => (
-              <div
-                key={agent.id}
-                className="bg-card rounded-xl border border-line p-5 shadow-sm hover:border-brand/50 transition-colors cursor-pointer relative overflow-hidden"
-                onClick={() => setSelectedAgent(agent)}
-              >
-                <div
-                  className={`absolute top-0 left-0 w-1 h-full ${agent.bg.replace("bg-", "bg-").replace("100", "400")}`}
-                />
-
-                <div className="flex justify-between items-start mb-4">
-                  <div className="flex items-center gap-3">
-                    <span
-                      className={`grid size-10 place-items-center rounded-lg ${agent.bg} ${agent.color}`}
-                    >
-                      <agent.icon className="size-5" />
-                    </span>
-                    <div>
-                      <h3 className="font-semibold">{agent.name}</h3>
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider mt-1 ${getStatusColor(agent.status)}`}
-                      >
-                        {agent.status}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                      Confidence
-                    </p>
-                    <p className="font-semibold text-sage">{agent.confidence}</p>
-                  </div>
-                </div>
-
-                <div className="space-y-2 text-sm">
-                  <p className="text-muted-foreground line-clamp-1">{agent.role}</p>
-                  <div className="pt-3 border-t border-line grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <span className="block text-muted-foreground mb-0.5">Input</span>
-                      <span className="font-medium line-clamp-1">{agent.input}</span>
-                    </div>
-                    <div>
-                      <span className="block text-muted-foreground mb-0.5">Output</span>
-                      <span className="font-medium line-clamp-1">{agent.output}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* RIGHT COLUMN: Live Activity Stream */}
-        <div className="xl:col-span-3">
-          <div className="bg-card rounded-xl border border-line shadow-sm h-full max-h-[800px] flex flex-col">
-            <div className="p-4 border-b border-line flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Activity className="size-4 text-brand" />
-                <h3 className="font-semibold text-sm uppercase tracking-wider">
-                  Live Activity Stream
-                </h3>
-              </div>
-              <span className="flex size-2 rounded-full bg-sage animate-pulse" />
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {events.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-muted-foreground opacity-50 py-12">
-                  <Activity className="size-8 mb-2" />
-                  <p className="text-sm">Listening for real-time agent events...</p>
-                </div>
-              ) : (
-                events.map((event) => (
+                return (
                   <div
-                    key={event.id}
-                    className="animate-in fade-in slide-in-from-right-4 p-3 rounded-lg bg-ice-2 border border-line text-sm"
+                    key={e.id}
+                    className="pt-2.5 first:pt-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
                   >
-                    <div className="flex justify-between items-center text-xs text-muted-foreground mb-1">
-                      <span className="font-semibold text-foreground">{event.agent}</span>
-                      <span className="font-mono text-[11px]">{event.timestamp}</span>
+                    <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold border shrink-0 ${styling.badge}`}>
+                        {e.agent_name}
+                      </span>
+                      <p className="text-slate-200 text-xs font-medium truncate">{e.action}</p>
                     </div>
-                    <p className="font-medium text-xs leading-relaxed text-foreground/90">
-                      {event.action}
-                    </p>
-                    {event.run_id && (
-                      <div className="mt-1.5 pt-1.5 border-t border-line/60 flex items-center justify-between text-[10px] text-muted-foreground font-mono">
-                        <span>Run: #{event.run_id.slice(0, 8)}</span>
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      </main>
 
-      {/* Side Drawer for Agent Details */}
-      {selectedAgent && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-background/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-md h-full bg-card border-l border-line shadow-2xl flex flex-col animate-in slide-in-from-right-full duration-300">
-            <div className="p-6 border-b border-line flex items-center justify-between bg-ice-2">
-              <div className="flex items-center gap-3">
-                <span
-                  className={`grid size-10 place-items-center rounded-lg ${selectedAgent.bg} ${selectedAgent.color}`}
-                >
-                  <selectedAgent.icon className="size-5" />
-                </span>
-                <div>
-                  <h2 className="font-display font-semibold text-lg">{selectedAgent.name}</h2>
-                  <span
-                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider mt-0.5 ${getStatusColor(selectedAgent.status)}`}
-                  >
-                    {selectedAgent.status}
-                  </span>
-                </div>
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => setSelectedAgent(null)}>
-                <X className="size-5" />
-              </Button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6 space-y-8">
-              <div>
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                  Role
-                </h4>
-                <p className="text-foreground">{selectedAgent.role}</p>
-              </div>
-
-              <div>
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                  Current Task
-                </h4>
-                <div className="flex items-center gap-2 p-3 bg-ice-2 rounded-lg border border-line">
-                  <Zap className="size-4 text-brand" />
-                  <span className="font-medium text-sm">{selectedAgent.task}</span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                    Input
-                  </h4>
-                  <div className="p-3 bg-card border border-line rounded-lg text-sm">
-                    {selectedAgent.input}
-                  </div>
-                </div>
-                <div>
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                    Output
-                  </h4>
-                  <div className="p-3 bg-card border border-line rounded-lg text-sm">
-                    {selectedAgent.output}
-                  </div>
-                </div>
-              </div>
-
-              <div className="border-t border-line pt-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Latest Audit Record
-                  </h4>
-                  <span className="text-xs font-mono text-muted-foreground">20:41:05</span>
-                </div>
-                <div className="p-4 rounded-xl border border-line bg-card shadow-sm space-y-4">
-                  <div>
-                    <span className="text-xs text-muted-foreground block mb-1">Action</span>
-                    <span className="font-medium text-sm">Checked household income criterion</span>
-                  </div>
-                  <div>
-                    <span className="text-xs text-muted-foreground block mb-1">Evidence Used</span>
-                    <div className="flex items-center gap-2 text-sm bg-ice-2 p-2 rounded w-fit border border-line">
-                      <FileKey className="size-3.5 text-muted-foreground" /> Income Certificate
+                    <div className="flex items-center gap-3 shrink-0 text-[11px] text-slate-500 font-mono">
+                      {e.run_id && (
+                        <span className="rounded bg-slate-950 px-1.5 py-0.5 border border-slate-800 text-slate-400">
+                          run:{e.run_id.slice(0, 8)}
+                        </span>
+                      )}
+                      <span>{new Date(e.created_at).toLocaleTimeString()}</span>
                     </div>
                   </div>
-                  <div>
-                    <span className="text-xs text-muted-foreground block mb-1">Result Summary</span>
-                    <span className="font-medium text-sm text-sage flex items-center gap-1">
-                      <Bot className="size-4" /> Condition verified successfully.
-                    </span>
-                  </div>
-                </div>
-                <p className="text-[10px] text-muted-foreground text-center mt-3 uppercase tracking-wider">
-                  Chain-of-thought is hidden. Audit summaries only.
-                </p>
-              </div>
+                );
+              })}
             </div>
-          </div>
+          )}
         </div>
-      )}
-    </div>
+      </div>
+    </AdminLayout>
   );
-}
-
-function FlowBox({
-  label,
-  highlight = false,
-  agentId,
-  onClick,
-  active = false,
-}: {
-  label: string;
-  highlight?: boolean;
-  agentId?: string;
-  onClick?: () => void;
-  active?: boolean;
-}) {
-  return (
-    <div
-      onClick={onClick}
-      className={`px-4 py-2 rounded-lg text-xs font-medium text-center border-2 transition-all w-48 ${onClick ? "cursor-pointer hover:shadow-md" : ""} ${highlight ? "bg-amber-100 border-amber-300 text-amber-900" : active ? "bg-brand text-white border-brand shadow-[0_0_15px_rgba(37,99,235,0.5)]" : agentId ? "bg-card border-brand/40 hover:border-brand" : "bg-ice-2 border-line text-muted-foreground"}`}
-    >
-      {label}
-    </div>
-  );
-}
-
-function FlowArrow({ active = false }: { active?: boolean }) {
-  return (
-    <div
-      className={`h-6 w-0.5 my-1 flex items-end justify-center transition-colors ${active ? "bg-brand" : "bg-line"}`}
-    >
-      <ArrowDown
-        className={`size-3 translate-y-2 transition-colors ${active ? "text-brand" : "text-line"}`}
-      />
-    </div>
-  );
-}
-
-function getStatusColor(status: string) {
-  switch (status) {
-    case "ONLINE":
-      return "bg-emerald-100 text-emerald-700 border-emerald-200";
-    case "PROCESSING":
-      return "bg-brand/10 text-brand border-brand/20";
-    case "WAITING":
-      return "bg-slate-100 text-slate-700 border-slate-200";
-    case "ACTION REQUIRED":
-      return "bg-amber-100 text-amber-700 border-amber-200";
-    case "COMPLETED":
-      return "bg-purple-100 text-purple-700 border-purple-200";
-    default:
-      return "bg-slate-100 text-slate-700 border-slate-200";
-  }
 }

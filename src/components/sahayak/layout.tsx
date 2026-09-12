@@ -10,7 +10,6 @@ import {
   Menu,
   MessageSquareText,
   Search,
-  Settings2,
   ShieldCheck,
   Sparkles,
   UserRound,
@@ -156,27 +155,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <aside className="sticky top-22 hidden w-56 shrink-0 lg:block">
           <div className="rounded-xl border border-line bg-card p-3 shadow-sm">
             <Navigation />
-            <div className="my-3 border-t border-line" />
-            <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              Workspace
-            </p>
-            <nav className="space-y-1">
-              <Link
-                to="/admin/agents"
-                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-ice hover:text-foreground"
-              >
-                <ShieldCheck className="size-4 text-brand" />
-                AI Workforce
-              </Link>
-              <Link
-                to="/admin"
-                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-ice hover:text-foreground"
-              >
-                <Settings2 className="size-4" />
-                Admin
-              </Link>
-            </nav>
-            <div className="mt-5 border-t border-line pt-3">
+            <div className="mt-4 border-t border-line pt-3">
               <Button
                 variant="ghost"
                 className="w-full justify-start gap-3 px-3 text-sm font-medium text-muted-foreground"
@@ -229,17 +208,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
             <Navigation onNavigate={() => setMobileOpen(false)} />
             <div className="mt-8 border-t border-line pt-4">
-              <Link
-                to="/admin/agents"
-                onClick={() => setMobileOpen(false)}
-                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground"
-              >
-                <ShieldCheck className="size-4" />
-                AI Workforce
-              </Link>
               <Button
                 variant="ghost"
-                className="mt-1 w-full justify-start gap-3 px-3 text-sm font-medium text-muted-foreground"
+                className="w-full justify-start gap-3 px-3 text-sm font-medium text-muted-foreground"
                 onClick={() => {
                   setMobileOpen(false);
                   setConsentOpen(true);

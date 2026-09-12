@@ -24,6 +24,8 @@ import { Route as SignupRouteImport } from './routes/signup'
 import { Route as UpdatePasswordRouteImport } from './routes/update-password'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminAgentsRouteImport } from './routes/admin.agents'
+import { Route as AdminAnalyticsRouteImport } from './routes/admin.analytics'
+import { Route as AdminLoginRouteImport } from './routes/admin.login'
 import { Route as AdminSchemesRouteImport } from './routes/admin.schemes'
 import { Route as ApplicationsIndexRouteImport } from './routes/applications.index'
 import { Route as ApplicationsIdRouteImport } from './routes/applications.$id'
@@ -103,6 +105,16 @@ const AdminAgentsRoute = AdminAgentsRouteImport.update({
   path: '/admin/agents',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminAnalyticsRoute = AdminAnalyticsRouteImport.update({
+  id: '/admin/analytics',
+  path: '/admin/analytics',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminLoginRoute = AdminLoginRouteImport.update({
+  id: '/admin/login',
+  path: '/admin/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminSchemesRoute = AdminSchemesRouteImport.update({
   id: '/admin/schemes',
   path: '/admin/schemes',
@@ -134,6 +146,8 @@ export interface FileRoutesByFullPath {
   '/signup': typeof SignupRoute
   '/update-password': typeof UpdatePasswordRoute
   '/admin/agents': typeof AdminAgentsRoute
+  '/admin/analytics': typeof AdminAnalyticsRoute
+  '/admin/login': typeof AdminLoginRoute
   '/admin/schemes': typeof AdminSchemesRoute
   '/applications/$id': typeof ApplicationsIdRoute
   '/admin/': typeof AdminIndexRoute
@@ -154,6 +168,8 @@ export interface FileRoutesByTo {
   '/signup': typeof SignupRoute
   '/update-password': typeof UpdatePasswordRoute
   '/admin/agents': typeof AdminAgentsRoute
+  '/admin/analytics': typeof AdminAnalyticsRoute
+  '/admin/login': typeof AdminLoginRoute
   '/admin/schemes': typeof AdminSchemesRoute
   '/applications/$id': typeof ApplicationsIdRoute
   '/admin': typeof AdminIndexRoute
@@ -175,6 +191,8 @@ export interface FileRoutesById {
   '/signup': typeof SignupRoute
   '/update-password': typeof UpdatePasswordRoute
   '/admin/agents': typeof AdminAgentsRoute
+  '/admin/analytics': typeof AdminAnalyticsRoute
+  '/admin/login': typeof AdminLoginRoute
   '/admin/schemes': typeof AdminSchemesRoute
   '/applications/$id': typeof ApplicationsIdRoute
   '/admin/': typeof AdminIndexRoute
@@ -197,6 +215,8 @@ export interface FileRouteTypes {
     | '/signup'
     | '/update-password'
     | '/admin/agents'
+    | '/admin/analytics'
+    | '/admin/login'
     | '/admin/schemes'
     | '/applications/$id'
     | '/admin/'
@@ -217,6 +237,8 @@ export interface FileRouteTypes {
     | '/signup'
     | '/update-password'
     | '/admin/agents'
+    | '/admin/analytics'
+    | '/admin/login'
     | '/admin/schemes'
     | '/applications/$id'
     | '/admin'
@@ -237,6 +259,8 @@ export interface FileRouteTypes {
     | '/signup'
     | '/update-password'
     | '/admin/agents'
+    | '/admin/analytics'
+    | '/admin/login'
     | '/admin/schemes'
     | '/applications/$id'
     | '/admin/'
@@ -258,6 +282,8 @@ export interface RootRouteChildren {
   SignupRoute: typeof SignupRoute
   UpdatePasswordRoute: typeof UpdatePasswordRoute
   AdminAgentsRoute: typeof AdminAgentsRoute
+  AdminAnalyticsRoute: typeof AdminAnalyticsRoute
+  AdminLoginRoute: typeof AdminLoginRoute
   AdminSchemesRoute: typeof AdminSchemesRoute
   ApplicationsIdRoute: typeof ApplicationsIdRoute
   AdminIndexRoute: typeof AdminIndexRoute
@@ -371,6 +397,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAgentsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/analytics': {
+      id: '/admin/analytics'
+      path: '/admin/analytics'
+      fullPath: '/admin/analytics'
+      preLoaderRoute: typeof AdminAnalyticsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/login': {
+      id: '/admin/login'
+      path: '/admin/login'
+      fullPath: '/admin/login'
+      preLoaderRoute: typeof AdminLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/schemes': {
       id: '/admin/schemes'
       path: '/admin/schemes'
@@ -410,6 +450,8 @@ const rootRouteChildren: RootRouteChildren = {
   SignupRoute: SignupRoute,
   UpdatePasswordRoute: UpdatePasswordRoute,
   AdminAgentsRoute: AdminAgentsRoute,
+  AdminAnalyticsRoute: AdminAnalyticsRoute,
+  AdminLoginRoute: AdminLoginRoute,
   AdminSchemesRoute: AdminSchemesRoute,
   ApplicationsIdRoute: ApplicationsIdRoute,
   AdminIndexRoute: AdminIndexRoute,

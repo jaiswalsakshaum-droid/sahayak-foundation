@@ -1,11 +1,11 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Users,
   FileText,
-  CheckCircle,
+  CheckCircle2,
   Clock,
   Activity,
   Shield,
@@ -16,7 +16,14 @@ import {
   Eye,
   AlertCircle,
   Landmark,
-  ArrowLeft,
+  FileCheck2,
+  Search,
+  Filter,
+  ScrollText,
+  AlertTriangle,
+  Send,
+  MessageSquareQuote,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,449 +31,559 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { requireAdmin } from "@/lib/auth";
+import { AdminLayout } from "@/components/admin/AdminLayout";
 import {
   getAdminMetrics,
   getPendingReviewApplications,
   reviewApplication,
+  getAuditLogs,
   type PendingReviewApplication,
+  type AuditLogEntry,
 } from "@/lib/admin-services";
-import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
 export const Route = createFileRoute("/admin/")({
   beforeLoad: async () => {
     await requireAdmin();
   },
-  component: AdminDashboard,
+  head: () => ({
+    meta: [
+      { title: "Control Center — Sahayak Admin Console" },
+      {
+        name: "description",
+        content: "Live supervisory metrics, AI agent tracking, and human review queue.",
+      },
+    ],
+  }),
+  component: AdminControlCenter,
 });
 
-function AdminDashboard() {
+function AdminControlCenter() {
   const queryClient = useQueryClient();
   const [selectedApp, setSelectedApp] = useState<PendingReviewApplication | null>(null);
-  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
-  const [rejectReason, setRejectReason] = useState("");
-  const [isSweeping, setIsSweeping] = useState(false);
+  const [reviewAction, setReviewAction] = useState<"approved" | "rejected" | "request_info" | null>(null);
+  const [actionReason, setActionReason] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showAuditLogs, setShowAuditLogs] = useState(false);
 
   // Queries
   const metricsQuery = useQuery({
     queryKey: ["admin", "metrics"],
     queryFn: getAdminMetrics,
+    refetchInterval: 10000,
   });
 
   const queueQuery = useQuery({
-    queryKey: ["admin", "queue"],
-    queryFn: getPendingReviewApplications,
+    queryKey: ["admin", "queue", statusFilter],
+    queryFn: () => getPendingReviewApplications(statusFilter),
+    refetchInterval: 10000,
   });
 
-  // Review Mutations
-  const approveMutation = useMutation({
-    mutationFn: async (appId: string) => {
-      const res = await reviewApplication(appId, "approved", "Approved by human reviewer.");
+  const auditQuery = useQuery({
+    queryKey: ["admin", "auditLogs"],
+    queryFn: () => getAuditLogs(30),
+    enabled: showAuditLogs,
+  });
+
+  // Review Mutation
+  const reviewMutation = useMutation({
+    mutationFn: async ({
+      appId,
+      action,
+      notes,
+    }: {
+      appId: string;
+      action: "approved" | "rejected" | "request_info";
+      notes: string;
+    }) => {
+      const res = await reviewApplication(appId, action, notes);
       if (!res.ok) throw new Error(res.error);
-      return res;
+      return { appId, action };
     },
-    onSuccess: () => {
-      toast.success("Application Approved", {
-        description: "Application approved and recorded in immutable audit log.",
+    onSuccess: (data) => {
+      const actionText =
+        data.action === "approved" ? "Approved" : data.action === "rejected" ? "Rejected" : "Information Requested";
+      toast.success(`Application ${actionText}`, {
+        description: "Application decision committed to database and recorded in immutable audit log.",
       });
       queryClient.invalidateQueries({ queryKey: ["admin"] });
+      setReviewAction(null);
+      setActionReason("");
       setSelectedApp(null);
     },
     onError: (err: any) => {
-      toast.error("Approval Failed", { description: err.message });
+      toast.error("Action Failed", { description: err.message });
     },
   });
 
-  const rejectMutation = useMutation({
-    mutationFn: async ({ appId, reason }: { appId: string; reason: string }) => {
-      const res = await reviewApplication(appId, "rejected", reason);
-      if (!res.ok) throw new Error(res.error);
-      return res;
-    },
-    onSuccess: () => {
-      toast.success("Application Rejected", {
-        description: "Status updated and reason logged to audit trail.",
+  const handleOpenReviewModal = (app: PendingReviewApplication, action: "approved" | "rejected" | "request_info") => {
+    setSelectedApp(app);
+    setReviewAction(action);
+    setActionReason(
+      action === "approved"
+        ? "Verified applicant eligibility criteria and validated required supporting documents."
+        : "",
+    );
+  };
+
+  const handleCommitReview = () => {
+    if (!selectedApp || !reviewAction) return;
+    if (!actionReason.trim()) {
+      toast.error("Mandatory Justification Required", {
+        description: "Please enter a specific reason or note for this supervisory decision.",
       });
-      queryClient.invalidateQueries({ queryKey: ["admin"] });
-      setRejectDialogOpen(false);
-      setRejectReason("");
-      setSelectedApp(null);
-    },
-    onError: (err: any) => {
-      toast.error("Rejection Failed", { description: err.message });
-    },
-  });
-
-  const triggerTrackerSweep = async () => {
-    setIsSweeping(true);
-    try {
-      if (isSupabaseConfigured) {
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
-        const edgeFunctionUrl = `${supabaseUrl}/functions/v1/tracker-sweep`;
-        const { data: sessionData } = await supabase.auth.getSession();
-
-        const res = await fetch(edgeFunctionUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${sessionData?.session?.access_token || ""}`,
-            apikey: import.meta.env.VITE_SUPABASE_ANON_KEY || "",
-          },
-          body: JSON.stringify({}),
-        });
-
-        if (res.ok) {
-          toast.success("Tracker Sweep Triggered", {
-            description:
-              "Tracker Agent is scanning active review SLAs and writing timeline events.",
-          });
-        } else {
-          toast.info("Tracker Sweep Dispatched", {
-            description: "Sweep command transmitted to workforce runtime.",
-          });
-        }
-      } else {
-        toast.info("Local Demo Tracker Sweep", {
-          description: "Tracker agent simulated scan completed.",
-        });
-      }
-      queryClient.invalidateQueries({ queryKey: ["admin"] });
-    } catch (e: any) {
-      toast.error("Tracker sweep dispatch notice", { description: e.message });
-    } finally {
-      setIsSweeping(false);
+      return;
     }
+    reviewMutation.mutate({
+      appId: selectedApp.id,
+      action: reviewAction,
+      notes: actionReason.trim(),
+    });
   };
 
   const metrics = metricsQuery.data;
   const queue = queueQuery.data || [];
 
+  const filteredQueue = queue.filter((item) => {
+    const matchesSearch =
+      item.tracking_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.citizen_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.scheme_name.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesSearch;
+  });
+
   return (
-    <div className="min-h-screen bg-ice-2 text-foreground flex flex-col">
-      <header className="sticky top-0 z-30 border-b border-line bg-ice-2/90 backdrop-blur-sm">
-        <div className="mx-auto flex h-16 w-full items-center px-5">
-          <Link to="/" className="flex items-center gap-2 mr-8 text-foreground hover:text-brand">
-            <span className="grid size-8 place-items-center rounded-lg bg-slate-900 font-display text-sm font-semibold text-white">
-              S
+    <AdminLayout
+      title="Administrative Control Center"
+      subtitle="Supervise civic workflows, resolve flagged applications, and monitor live AI workforce operations."
+    >
+      <div className="space-y-8">
+        {/* Metric Cards Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+          {/* Card 1: Active Citizens */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm">
+            <div className="flex items-center justify-between text-slate-400 mb-2">
+              <span className="text-xs font-medium uppercase tracking-wider">Active Citizens</span>
+              <Users className="size-4 text-blue-400" />
+            </div>
+            <p className="text-2xl font-bold font-display text-white">
+              {metricsQuery.isLoading ? "—" : metrics?.active_citizens.toLocaleString() || 0}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">Registered profiles</p>
+          </div>
+
+          {/* Card 2: Total Applications */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm">
+            <div className="flex items-center justify-between text-slate-400 mb-2">
+              <span className="text-xs font-medium uppercase tracking-wider">Applications</span>
+              <FileText className="size-4 text-indigo-400" />
+            </div>
+            <p className="text-2xl font-bold font-display text-white">
+              {metricsQuery.isLoading ? "—" : metrics?.applications_total.toLocaleString() || 0}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">
+              {metrics?.applications_by_status.approved || 0} approved · {metrics?.applications_by_status.rejected || 0} rejected
+            </p>
+          </div>
+
+          {/* Card 3: Documents Verified */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm">
+            <div className="flex items-center justify-between text-slate-400 mb-2">
+              <span className="text-xs font-medium uppercase tracking-wider">Docs Verified</span>
+              <FileCheck2 className="size-4 text-emerald-400" />
+            </div>
+            <p className="text-2xl font-bold font-display text-white">
+              {metricsQuery.isLoading ? "—" : metrics?.documents_verified.toLocaleString() || 0}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">Via Gemini Vision OCR</p>
+          </div>
+
+          {/* Card 4: Agent Tasks */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm">
+            <div className="flex items-center justify-between text-slate-400 mb-2">
+              <span className="text-xs font-medium uppercase tracking-wider">Agent Tasks</span>
+              <Activity className="size-4 text-purple-400" />
+            </div>
+            <p className="text-2xl font-bold font-display text-white">
+              {metricsQuery.isLoading ? "—" : metrics?.agent_tasks_completed.toLocaleString() || 0}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">Executed across runs</p>
+          </div>
+
+          {/* Card 5: Avg Workflow Duration */}
+          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm">
+            <div className="flex items-center justify-between text-slate-400 mb-2">
+              <span className="text-xs font-medium uppercase tracking-wider">Avg Dwell Time</span>
+              <Clock className="size-4 text-amber-400" />
+            </div>
+            <p className="text-2xl font-bold font-display text-white">
+              {metricsQuery.isLoading ? "—" : metrics?.avg_workflow_time || "0s"}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">Start to completion</p>
+          </div>
+
+          {/* Card 6: Needing Review */}
+          <div className="rounded-xl border border-rose-900/40 bg-rose-950/20 p-4 shadow-sm">
+            <div className="flex items-center justify-between text-rose-300 mb-2">
+              <span className="text-xs font-semibold uppercase tracking-wider">Needs Review</span>
+              <AlertCircle className="size-4 text-rose-400" />
+            </div>
+            <p className="text-2xl font-bold font-display text-rose-200">
+              {metricsQuery.isLoading ? "—" : metrics?.applications_requiring_review || 0}
+            </p>
+            <p className="text-[11px] text-rose-400/80 mt-1">Awaiting human sign-off</p>
+          </div>
+        </div>
+
+        {/* Action Header & Filter Controls */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-bold font-display text-white flex items-center gap-2">
+              <Shield className="size-5 text-brand" />
+              Human Supervisory Review Queue
+            </h2>
+            <span className="rounded-full bg-slate-800 px-2.5 py-0.5 text-xs font-semibold text-slate-300">
+              {filteredQueue.length}
             </span>
-            <span className="font-display font-semibold hidden sm:block">Sahayak Admin</span>
-          </Link>
-          <nav className="flex items-center gap-6 text-sm font-medium">
-            <Link to="/admin" className="text-brand font-semibold">
-              Overview & Queue
-            </Link>
-            <Link to="/admin/agents" className="text-muted-foreground hover:text-foreground">
-              AI Workforce
-            </Link>
-            <Link to="/admin/schemes" className="text-muted-foreground hover:text-foreground">
-              Knowledge Base
-            </Link>
-            <Link to="/analytics" className="text-muted-foreground hover:text-foreground">
-              Analytics
-            </Link>
-          </nav>
-          <div className="ml-auto flex items-center gap-3">
-            <Button asChild size="sm" variant="ghost" className="text-xs text-muted-foreground hover:text-foreground">
-              <Link to="/dashboard" className="gap-1.5 flex items-center">
-                <ArrowLeft className="size-3.5" />
-                <span>Dashboard</span>
-              </Link>
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={triggerTrackerSweep}
-              disabled={isSweeping}
-              className="gap-1.5 bg-card text-xs font-medium"
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            {/* Search Input */}
+            <div className="relative flex-1 sm:w-64">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search citizen or scheme..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-brand"
+              />
+            </div>
+
+            {/* Status Filter */}
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-brand"
             >
-              {isSweeping ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="size-3.5 text-brand" />
-              )}
-              <span>Trigger Tracker Sweep</span>
+              <option value="all">All Pending</option>
+              <option value="submitted">Submitted</option>
+              <option value="under_review">Under Review</option>
+              <option value="awaiting_approval">Awaiting Approval</option>
+            </select>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => queryClient.invalidateQueries({ queryKey: ["admin"] })}
+              className="border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 h-8 text-xs"
+            >
+              <RefreshCw className={`size-3.5 mr-1.5 ${queueQuery.isRefetching ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowAuditLogs(!showAuditLogs)}
+              className="border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 h-8 text-xs"
+            >
+              <ScrollText className="size-3.5 mr-1.5 text-indigo-400" />
+              {showAuditLogs ? "Hide Audit Log" : "Audit Trail"}
             </Button>
           </div>
         </div>
-      </header>
 
-      <main className="flex-1 w-full px-5 py-8 mx-auto max-w-7xl space-y-8">
-        <div>
-          <h1 className="text-3xl font-display font-semibold mb-2">Control Center</h1>
-          <p className="text-muted-foreground">
-            Monitor real-time AI workforce metrics and perform human supervisory approvals.
-          </p>
-        </div>
-
-        {/* Aggregate Live Metrics */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
-          <MetricCard
-            title="Active Citizens"
-            value={metrics ? metrics.active_citizens.toLocaleString() : "—"}
-            icon={<Users className="size-4 text-brand" />}
-          />
-          <MetricCard
-            title="Applications"
-            value={metrics ? metrics.applications_processed.toLocaleString() : "—"}
-            icon={<FileText className="size-4 text-brand" />}
-          />
-          <MetricCard
-            title="Docs Verified"
-            value={metrics ? metrics.documents_verified.toLocaleString() : "—"}
-            icon={<CheckCircle className="size-4 text-sage" />}
-          />
-          <MetricCard
-            title="Agent Tasks"
-            value={metrics ? metrics.agent_tasks_completed.toLocaleString() : "—"}
-            icon={<Activity className="size-4 text-brand" />}
-          />
-          <MetricCard
-            title="Avg Workflow"
-            value={metrics ? metrics.avg_workflow_time : "—"}
-            icon={<Clock className="size-4 text-brand-soft" />}
-          />
-          <MetricCard
-            title="Needs Review"
-            value={metrics ? `${metrics.applications_requiring_review}` : "0"}
-            icon={<Shield className="size-4 text-amber" />}
-            highlight={Boolean(metrics && metrics.applications_requiring_review > 0)}
-          />
-        </div>
-
-        {/* Human Supervisory Review Queue */}
-        <div className="bg-card rounded-xl border border-line p-6 shadow-none space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold font-display">Human Supervisory Review Queue</h2>
-              <p className="text-xs text-muted-foreground">
-                Submitted applications awaiting human verification before final sanction. Decisions
-                are written to immutable audit logs.
-              </p>
+        {/* Audit Log Drawer if open */}
+        {showAuditLogs && (
+          <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-5 space-y-4 animate-in fade-in">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <ScrollText className="size-4 text-indigo-400" />
+                Immutable System & Human Audit Trail
+              </h3>
+              <span className="text-[11px] text-slate-400">Cryptographically ordered & persisted</span>
             </div>
-            <span className="text-xs font-semibold bg-amber/10 text-amber px-2.5 py-1 rounded-full border border-amber/20">
-              {queue.length} Pending
-            </span>
-          </div>
 
-          {queueQuery.isLoading ? (
-            <div className="p-12 text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
-              <Loader2 className="size-4 animate-spin" /> Loading review queue...
-            </div>
-          ) : queue.length === 0 ? (
-            <div className="p-12 text-center text-sm text-muted-foreground border-2 border-dashed border-line rounded-xl">
-              <CheckCircle className="size-8 mx-auto text-sage mb-2 opacity-60" />
-              <p className="font-medium text-foreground">Review Queue is Empty</p>
-              <p className="text-xs mt-1">All citizen applications are processed and up to date.</p>
-            </div>
-          ) : (
-            <div className="rounded-lg border border-line overflow-hidden">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-ice-2 text-muted-foreground border-b border-line">
-                  <tr>
-                    <th className="px-4 py-3 font-semibold">Tracking ID</th>
-                    <th className="px-4 py-3 font-semibold">Applicant</th>
-                    <th className="px-4 py-3 font-semibold">Scheme</th>
-                    <th className="px-4 py-3 font-semibold">Stage</th>
-                    <th className="px-4 py-3 font-semibold">Submitted</th>
-                    <th className="px-4 py-3 font-semibold text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line bg-card">
-                  {queue.map((app) => (
-                    <tr key={app.id} className="hover:bg-ice-2/40 transition-colors">
-                      <td className="px-4 py-3 font-mono font-medium text-brand">
-                        {app.tracking_id}
-                      </td>
-                      <td className="px-4 py-3 font-medium text-foreground">{app.citizen_name}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{app.scheme_name}</td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-amber/10 text-amber px-2 py-0.5 text-[10px] font-medium border border-amber/20">
-                          {app.status.replace(/_/g, " ")}
+            {auditQuery.isLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="size-5 animate-spin text-slate-400" />
+              </div>
+            ) : (auditQuery.data || []).length === 0 ? (
+              <p className="text-xs text-slate-500 py-4 text-center">No audit log entries found.</p>
+            ) : (
+              <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+                {(auditQuery.data || []).map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="flex items-start justify-between rounded-lg border border-slate-800/80 bg-slate-950/60 p-2.5 text-xs"
+                  >
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-white">{entry.agent_name}</span>
+                        <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono text-slate-300">
+                          {entry.action}
                         </span>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {app.created_at ? new Date(app.created_at).toLocaleDateString() : "Today"}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2.5 text-xs gap-1"
-                            onClick={() => setSelectedApp(app)}
-                          >
-                            <Eye className="size-3.5" /> Details
-                          </Button>
-                          <Button
-                            size="sm"
-                            className="h-7 px-2.5 text-xs gap-1 bg-sage hover:bg-sage/90 text-primary-foreground"
-                            disabled={approveMutation.isPending}
-                            onClick={() => approveMutation.mutate(app.id)}
-                          >
-                            <Check className="size-3.5" /> Approve
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-7 px-2.5 text-xs gap-1 border-coral/30 text-coral hover:bg-coral/10"
-                            onClick={() => {
-                              setSelectedApp(app);
-                              setRejectDialogOpen(true);
-                            }}
-                          >
-                            <X className="size-3.5" /> Reject
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </main>
-
-      {/* Detail View Modal */}
-      <Dialog open={!!selectedApp && !rejectDialogOpen} onOpenChange={() => setSelectedApp(null)}>
-        <DialogContent className="max-w-xl">
-          {selectedApp && (
-            <>
-              <DialogHeader>
-                <DialogTitle className="text-lg font-display">
-                  Review Application: {selectedApp.tracking_id}
-                </DialogTitle>
-                <p className="text-xs text-muted-foreground">
-                  {selectedApp.scheme_name} · {selectedApp.citizen_name}
-                </p>
-              </DialogHeader>
-
-              <div className="mt-4 space-y-4 text-xs">
-                <div className="rounded-lg border border-line bg-ice-2/40 p-4 space-y-2">
-                  <h4 className="font-semibold uppercase tracking-wider text-muted-foreground text-[10px]">
-                    Extracted Applicant Data
-                  </h4>
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    {Object.entries(selectedApp.applicant_info).map(([k, v]: [string, any]) => (
-                      <div key={k} className="p-2 rounded bg-card border border-line">
-                        <span className="text-muted-foreground block text-[10px]">{k}</span>
-                        <span className="font-medium text-foreground">
-                          {typeof v === "object" && v !== null
-                            ? v.value !== undefined && v.value !== null && v.value !== ""
-                              ? String(v.value)
-                              : "—"
-                            : String(v ?? "—")}
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                            entry.result === "APPROVED" || entry.result === "ACTIVE"
+                              ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
+                              : entry.result === "REJECTED"
+                              ? "bg-rose-950 text-rose-300 border border-rose-800"
+                              : "bg-slate-800 text-slate-300"
+                          }`}
+                        >
+                          {entry.result}
                         </span>
                       </div>
-                    ))}
+                      <p className="text-slate-400 text-[11px]">{entry.evidence}</p>
+                    </div>
+                    <span className="text-[10px] text-slate-500 shrink-0 ml-2">
+                      {new Date(entry.created_at).toLocaleTimeString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Review Queue Table / List */}
+        {queueQuery.isLoading ? (
+          <div className="flex flex-col items-center justify-center py-16 text-slate-400 space-y-2">
+            <Loader2 className="size-8 animate-spin text-brand" />
+            <p className="text-sm">Loading live review queue from database...</p>
+          </div>
+        ) : filteredQueue.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-800 bg-slate-900/30 p-12 text-center">
+            <CheckCircle2 className="size-10 text-emerald-400 mx-auto mb-3" />
+            <h3 className="text-base font-semibold text-white">Review Queue Clear</h3>
+            <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
+              All submitted applications have been processed or no pending cases match your active filter.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {filteredQueue.map((app) => (
+              <div
+                key={app.id}
+                className="rounded-xl border border-slate-800 bg-slate-900/70 p-5 shadow-sm hover:border-slate-700 transition-all space-y-4"
+              >
+                {/* Header Row */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-xs font-semibold text-brand bg-brand/10 border border-brand/20 px-2 py-0.5 rounded">
+                      {app.tracking_id}
+                    </span>
+                    <div>
+                      <h4 className="text-sm font-bold text-white">{app.citizen_name}</h4>
+                      <p className="text-xs text-slate-400">
+                        {app.citizen_location || "Location not specified"} {app.citizen_phone ? `· ${app.citizen_phone}` : ""}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider ${
+                        app.status === "approved"
+                          ? "bg-emerald-950/80 text-emerald-300 border border-emerald-800/50"
+                          : app.status === "rejected"
+                          ? "bg-rose-950/80 text-rose-300 border border-rose-800/50"
+                          : "bg-amber-950/80 text-amber-300 border border-amber-800/50"
+                      }`}
+                    >
+                      {app.status.replace("_", " ")}
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      {new Date(app.created_at).toLocaleDateString()}
+                    </span>
                   </div>
                 </div>
 
-                {selectedApp.source_run_id && (
-                  <div className="p-3 rounded border border-line bg-card text-muted-foreground flex items-center justify-between">
-                    <span>Source Agent Run ID</span>
-                    <span className="font-mono text-brand text-[11px]">
-                      {selectedApp.source_run_id}
+                {/* Scheme & Applicant Info Details */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                  <div className="space-y-1.5 rounded-lg bg-slate-950/60 p-3 border border-slate-800/80">
+                    <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                      <Landmark className="size-3.5 text-indigo-400" />
+                      Applied Welfare Scheme
                     </span>
+                    <p className="font-bold text-white text-sm">{app.scheme_name}</p>
+                    {app.scheme_category && (
+                      <p className="text-slate-400 text-[11px]">Category: {app.scheme_category}</p>
+                    )}
                   </div>
-                )}
+
+                  <div className="space-y-1.5 rounded-lg bg-slate-950/60 p-3 border border-slate-800/80">
+                    <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                      <FileCheck2 className="size-3.5 text-emerald-400" />
+                      Applicant Attributes & Extracted Fields
+                    </span>
+                    <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
+                      {Object.keys(app.applicant_info || {}).length > 0 ? (
+                        Object.entries(app.applicant_info).map(([k, v]) => (
+                          <div key={k} className="flex justify-between text-[11px]">
+                            <span className="text-slate-400">{k}:</span>
+                            <span className="text-slate-200 font-medium">{String(v)}</span>
+                          </div>
+                        ))
+                      ) : (
+                        <p className="text-[11px] text-slate-500 italic">No custom fields extracted.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Admin Action Buttons */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                  <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                    <MessageSquareQuote className="size-3 text-slate-500" />
+                    <span>Supervisory sign-off required for final civic sanction.</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => handleOpenReviewModal(app, "request_info")}
+                      className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 h-8 text-xs font-medium"
+                    >
+                      <Send className="size-3.5 mr-1 text-amber-400" />
+                      Request Info
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      onClick={() => handleOpenReviewModal(app, "rejected")}
+                      className="bg-rose-950 hover:bg-rose-900 text-rose-200 border border-rose-800 h-8 text-xs font-medium"
+                    >
+                      <X className="size-3.5 mr-1" />
+                      Reject
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      onClick={() => handleOpenReviewModal(app, "approved")}
+                      className="bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm h-8 text-xs font-medium"
+                    >
+                      <Check className="size-3.5 mr-1" />
+                      Approve Scheme
+                    </Button>
+                  </div>
+                </div>
               </div>
+            ))}
+          </div>
+        )}
+      </div>
 
-              <DialogFooter className="gap-2 pt-4">
-                <Button variant="outline" size="sm" onClick={() => setSelectedApp(null)}>
-                  Close
-                </Button>
-                <Button
-                  size="sm"
-                  className="bg-sage hover:bg-sage/90 text-primary-foreground"
-                  onClick={() => approveMutation.mutate(selectedApp.id)}
-                >
-                  <Check className="size-3.5 mr-1" /> Approve Application
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="border-coral/30 text-coral hover:bg-coral/10"
-                  onClick={() => setRejectDialogOpen(true)}
-                >
-                  <X className="size-3.5 mr-1" /> Reject Application
-                </Button>
-              </DialogFooter>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      {/* Reject Reason Dialog */}
-      <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
-        <DialogContent className="max-w-md">
+      {/* Review Confirmation Modal with Mandatory Reason Field */}
+      <Dialog
+        open={Boolean(selectedApp && reviewAction)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedApp(null);
+            setReviewAction(null);
+            setActionReason("");
+          }
+        }}
+      >
+        <DialogContent className="bg-slate-900 border-slate-800 text-white max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-lg text-coral flex items-center gap-2">
-              <AlertCircle className="size-5" /> Reject Application
+            <DialogTitle className="text-lg font-bold text-white flex items-center gap-2 font-display">
+              {reviewAction === "approved" ? (
+                <>
+                  <CheckCircle2 className="size-5 text-emerald-400" />
+                  Approve Application
+                </>
+              ) : reviewAction === "rejected" ? (
+                <>
+                  <AlertTriangle className="size-5 text-rose-400" />
+                  Reject Application
+                </>
+              ) : (
+                <>
+                  <Send className="size-5 text-amber-400" />
+                  Request More Information
+                </>
+              )}
             </DialogTitle>
-            <p className="text-xs text-muted-foreground">
-              Please enter the official rejection reason. This will be written to the immutable
-              audit log and notified to the citizen.
-            </p>
+            <DialogDescription className="text-xs text-slate-400">
+              {selectedApp && (
+                <span>
+                  Case Tracking ID: <strong className="text-slate-200 font-mono">{selectedApp.tracking_id}</strong> (
+                  {selectedApp.citizen_name})
+                </span>
+              )}
+            </DialogDescription>
           </DialogHeader>
 
-          <div className="mt-4 space-y-3">
-            <Textarea
-              placeholder="e.g., Annual income exceeds maximum permissible scheme threshold..."
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              className="text-xs min-h-[100px]"
-            />
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                <span>Mandatory Reviewer Notes / Justification:</span>
+                <span className="text-[10px] text-amber-400">Audit Logged</span>
+              </label>
+              <Textarea
+                placeholder={
+                  reviewAction === "approved"
+                    ? "Enter validation notes regarding eligibility confirmation and verified records..."
+                    : reviewAction === "rejected"
+                    ? "Specify the regulatory grounds for rejection (e.g., income ceiling exceeded, invalid documents)..."
+                    : "Specify the exact missing documents or clarifications required from the citizen..."
+                }
+                value={actionReason}
+                onChange={(e) => setActionReason(e.target.value)}
+                className="bg-slate-950 border-slate-700 text-white placeholder:text-slate-500 text-xs min-h-[100px] focus-visible:ring-brand"
+              />
+            </div>
+
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              This action will update the citizen's application state in real-time, generate a citizen portal notification, and write an immutable audit log record.
+            </p>
           </div>
 
-          <DialogFooter className="gap-2 pt-4">
-            <Button variant="outline" size="sm" onClick={() => setRejectDialogOpen(false)}>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={reviewMutation.isPending}
+              onClick={() => {
+                setSelectedApp(null);
+                setReviewAction(null);
+              }}
+              className="border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700"
+            >
               Cancel
             </Button>
             <Button
               size="sm"
-              className="bg-coral text-primary-foreground hover:bg-coral/90"
-              disabled={!rejectReason.trim() || rejectMutation.isPending}
-              onClick={() => {
-                if (selectedApp) {
-                  rejectMutation.mutate({ appId: selectedApp.id, reason: rejectReason });
-                }
-              }}
+              disabled={reviewMutation.isPending}
+              onClick={handleCommitReview}
+              className={`text-white font-medium ${
+                reviewAction === "approved"
+                  ? "bg-emerald-600 hover:bg-emerald-500"
+                  : reviewAction === "rejected"
+                  ? "bg-rose-600 hover:bg-rose-500"
+                  : "bg-amber-600 hover:bg-amber-500"
+              }`}
             >
-              {rejectMutation.isPending ? "Rejecting..." : "Confirm Rejection"}
+              {reviewMutation.isPending ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin mr-1.5" />
+                  Recording Decision...
+                </>
+              ) : (
+                "Confirm & Commit"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
-  );
-}
-
-function MetricCard({
-  title,
-  value,
-  icon,
-  highlight = false,
-}: {
-  title: string;
-  value: string;
-  icon: React.ReactNode;
-  highlight?: boolean;
-}) {
-  return (
-    <div
-      className={`p-4 rounded-xl border ${
-        highlight ? "border-amber/30 bg-amber/5" : "border-line bg-card"
-      } shadow-none flex items-center justify-between`}
-    >
-      <div>
-        <p className="text-[11px] font-medium text-muted-foreground mb-0.5">{title}</p>
-        <p className="text-xl font-bold font-display">{value}</p>
-      </div>
-      <div className="p-2 rounded-lg bg-ice text-brand">{icon}</div>
-    </div>
+    </AdminLayout>
   );
 }

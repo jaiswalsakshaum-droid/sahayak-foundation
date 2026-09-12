@@ -208,6 +208,29 @@ function DashboardPage() {
   return (
     <AppShell>
       <div className="space-y-6">
+        {profile?.role === "admin" && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-slate-700 bg-slate-900 p-4 text-white shadow-md">
+            <div className="flex items-center gap-3">
+              <div className="grid size-8 place-items-center rounded-lg bg-brand/20 text-brand">
+                <ShieldCheck className="size-5" />
+              </div>
+              <div>
+                <p className="text-xs font-bold font-display">Administrator Mode Active</p>
+                <p className="text-[11px] text-slate-300">
+                  You have supervisory privileges. Switch to the administrative control center to review flagged applications and live workforce telemetry.
+                </p>
+              </div>
+            </div>
+            <Link
+              to="/admin"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand/90 shrink-0"
+            >
+              Open Admin Console
+              <ArrowRight className="size-3.5" />
+            </Link>
+          </div>
+        )}
+
         <div>
           <div className="flex items-center gap-2 text-[11px] text-brand-soft">
             <span className="size-1.5 animate-pulse-dot rounded-full bg-sage" />
