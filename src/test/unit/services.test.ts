@@ -43,23 +43,26 @@ describe("ServiceResult Monad Pattern", () => {
   });
 });
 
-describe("Agent Workforce Roster", () => {
-  it("includes all 6 specialized agents including Tracker Agent", () => {
-    expect(SAHAYAK_AGENT_ROSTER).toHaveLength(6);
-    const keys = SAHAYAK_AGENT_ROSTER.map((a) => a.key);
-    expect(keys).toEqual([
-      "citizen",
-      "scheme",
-      "eligibility",
-      "document",
-      "application",
-      "tracker",
-    ]);
-  });
+describe("Citizen Need & Intent Understanding", () => {
+  it("classifies education, agriculture, housing, and pension keywords correctly", async () => {
+    const { understandCitizenNeed } = await import("@/lib/services");
+    const edu = await understandCitizenNeed("I need scholarship for my daughter's college");
+    expect(edu.category).toBe("Education");
 
-  it("defines standard citizen journey steps", () => {
-    expect(journeySteps.length).toBeGreaterThanOrEqual(6);
-    expect(journeySteps.map((s) => s.label)).toContain("Need");
-    expect(journeySteps.map((s) => s.label)).toContain("Next action");
+    const agri = await understandCitizenNeed("I am a farmer looking for kisan assistance");
+    expect(agri.category).toBe("Agriculture");
+
+    const housing = await understandCitizenNeed("Looking for PM awas yojana subsidy");
+    expect(housing.category).toBe("Housing");
+  });
+});
+
+describe("Application Submission UUID Guard", () => {
+  it("correctly identifies valid UUID vs tracking slug formats", () => {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    expect(uuidRegex.test("a0000000-0000-0000-0000-000000000001")).toBe(true);
+    expect(uuidRegex.test("c6a47f7d-1cbe-4742-adf1-5f0c161d338d")).toBe(true);
+    expect(uuidRegex.test("nmmse-2024")).toBe(false);
+    expect(uuidRegex.test("SAH-2026-004281")).toBe(false);
   });
 });

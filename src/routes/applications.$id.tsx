@@ -54,7 +54,10 @@ export function ApplicationDetailPage() {
         setProfile(userProfile);
 
         if (isSupabaseConfigured) {
-          const { data: appData } = await supabase
+          const isUuid =
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+          let appQuery = supabase
             .from("applications")
             .select(
               `
@@ -76,9 +79,15 @@ export function ApplicationDetailPage() {
                 )
               )
             `,
-            )
-            .or(`id.eq.${id},tracking_id.eq.${id}`)
-            .maybeSingle();
+            );
+
+          if (isUuid) {
+            appQuery = appQuery.or(`id.eq.${id},tracking_id.eq.${id}`);
+          } else {
+            appQuery = appQuery.eq("tracking_id", id);
+          }
+
+          const { data: appData } = await appQuery.maybeSingle();
 
           if (appData && isMounted) {
             setApplication(appData);

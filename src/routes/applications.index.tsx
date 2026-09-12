@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Bot, ChevronRight, FileText, CheckCircle2, Clock, Plus } from "lucide-react";
+import { Bot, ChevronRight, FileText, Clock, Plus, Loader2, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { requireAuth, getSession } from "@/lib/auth";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
@@ -32,8 +32,10 @@ const FALLBACK_APPS: AppItem[] = [
 ];
 
 function ApplicationsPage() {
-  const [applications, setApplications] = useState<AppItem[]>(FALLBACK_APPS);
-  const [loading, setLoading] = useState(true);
+  const [applications, setApplications] = useState<AppItem[]>(
+    isSupabaseConfigured ? [] : FALLBACK_APPS,
+  );
+  const [loading, setLoading] = useState(isSupabaseConfigured);
 
   useEffect(() => {
     let active = true;
@@ -47,7 +49,10 @@ function ApplicationsPage() {
         }
 
         if (!isSupabaseConfigured) {
-          if (active) setLoading(false);
+          if (active) {
+            setApplications(FALLBACK_APPS);
+            setLoading(false);
+          }
           return;
         }
 
@@ -57,8 +62,8 @@ function ApplicationsPage() {
           .eq("citizen_id", session.user.id)
           .order("created_at", { ascending: false });
 
-        if (!error && data && data.length > 0 && active) {
-          const mapped: AppItem[] = data.map((row: any) => {
+        if (!error && active) {
+          const mapped: AppItem[] = (data || []).map((row: any) => {
             const schemeName =
               row.schemes?.name ||
               CANONICAL_SCHEME_LIST.find((s) => s.id === row.scheme_id)?.name ||
@@ -106,10 +111,17 @@ function ApplicationsPage() {
   return (
     <div className="min-h-screen bg-ice-2 text-foreground flex flex-col">
       <main className="flex-1 mx-auto w-full max-w-5xl px-5 py-10">
+        {!isSupabaseConfigured && (
+          <div className="mb-6 rounded-xl border border-amber/30 bg-amber/10 p-3 text-xs text-amber flex items-center justify-between">
+            <span>Demo mode active — displaying sample application fixtures.</span>
+            <span className="font-semibold uppercase tracking-wider text-[10px]">Demo</span>
+          </div>
+        )}
+
         <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="text-3xl font-display font-semibold mb-1">My Applications</h1>
-            <p className="text-muted-foreground">
+            <p className="text-muted-foreground text-sm">
               Review drafts prepared by Sahayak, provide human consent, and track official status.
             </p>
           </div>
@@ -120,60 +132,80 @@ function ApplicationsPage() {
           </Button>
         </div>
 
-        <div className="grid gap-4">
-          {applications.map((app) => (
-            <Link
-              key={app.id}
-              to={`/applications/${app.id}`}
-              className="block bg-card rounded-xl border border-line p-6 hover:border-brand/50 transition-all group shadow-sm"
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-start gap-4">
-                  <div
-                    className={`grid size-12 place-items-center rounded-lg mt-1 ${
-                      app.actionReady ? "bg-amber/10 text-amber" : "bg-brand/10 text-brand"
-                    }`}
-                  >
-                    {app.actionReady ? (
-                      <FileText className="size-6" />
-                    ) : (
-                      <Clock className="size-6" />
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-xs font-mono text-muted-foreground mb-1">ID: {app.id}</p>
-                    <h3 className="text-xl font-semibold mb-1 group-hover:text-brand transition-colors">
-                      {app.schemeName}
-                    </h3>
-                    <p className="text-sm text-foreground flex items-center gap-2">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          app.actionReady
-                            ? "bg-amber/20 text-amber border border-amber/30"
-                            : "bg-brand/15 text-brand border border-brand/20"
-                        }`}
-                      >
-                        {app.status}
-                      </span>
-                      <span className="text-muted-foreground text-xs">{app.date}</span>
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-4 sm:ml-auto pl-16 sm:pl-0">
-                  {app.actionReady && (
-                    <div className="flex items-center gap-2 text-xs text-brand font-medium bg-brand/5 px-3 py-1.5 rounded-lg border border-brand/20">
-                      <Bot className="size-4" /> Ready for your sign-off
+        {loading ? (
+          <div className="bg-card rounded-xl border border-line p-12 text-center text-sm text-muted-foreground shadow-sm">
+            <Loader2 className="size-6 animate-spin mx-auto mb-2 text-brand" />
+            Loading applications...
+          </div>
+        ) : applications.length === 0 ? (
+          <div className="bg-card rounded-xl border border-dashed border-line p-12 text-center shadow-sm">
+            <FolderOpen className="size-10 mx-auto mb-3 text-muted-foreground/50" />
+            <h3 className="font-semibold text-foreground text-base">No active applications yet</h3>
+            <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto mb-6">
+              Use Sahayak AI Assistant to discover schemes you qualify for and prepare your application automatically.
+            </p>
+            <Button asChild size="sm">
+              <Link to="/assistant">
+                <Bot className="mr-2 size-4" /> Discover Schemes with Assistant
+              </Link>
+            </Button>
+          </div>
+        ) : (
+          <div className="grid gap-4">
+            {applications.map((app) => (
+              <Link
+                key={app.id}
+                to={`/applications/${app.id}`}
+                className="block bg-card rounded-xl border border-line p-6 hover:border-brand/50 transition-all group shadow-sm"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-start gap-4">
+                    <div
+                      className={`grid size-12 place-items-center rounded-lg mt-1 ${
+                        app.actionReady ? "bg-amber/10 text-amber" : "bg-brand/10 text-brand"
+                      }`}
+                    >
+                      {app.actionReady ? (
+                        <FileText className="size-6" />
+                      ) : (
+                        <Clock className="size-6" />
+                      )}
                     </div>
-                  )}
-                  <Button variant="ghost" size="icon" className="shrink-0">
-                    <ChevronRight className="size-5" />
-                  </Button>
+                    <div>
+                      <p className="text-xs font-mono text-muted-foreground mb-1">ID: {app.id}</p>
+                      <h3 className="text-xl font-semibold mb-1 group-hover:text-brand transition-colors">
+                        {app.schemeName}
+                      </h3>
+                      <p className="text-sm text-foreground flex items-center gap-2">
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                            app.actionReady
+                              ? "bg-amber/20 text-amber border border-amber/30"
+                              : "bg-brand/15 text-brand border border-brand/20"
+                          }`}
+                        >
+                          {app.status}
+                        </span>
+                        <span className="text-muted-foreground text-xs">{app.date}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4 sm:ml-auto pl-16 sm:pl-0">
+                    {app.actionReady && (
+                      <div className="flex items-center gap-2 text-xs text-brand font-medium bg-brand/5 px-3 py-1.5 rounded-lg border border-brand/20">
+                        <Bot className="size-4" /> Ready for your sign-off
+                      </div>
+                    )}
+                    <Button variant="ghost" size="icon" className="shrink-0">
+                      <ChevronRight className="size-5" />
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </Link>
-          ))}
-        </div>
+              </Link>
+            ))}
+          </div>
+        )}
       </main>
     </div>
   );

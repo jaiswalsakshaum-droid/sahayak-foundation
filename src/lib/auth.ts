@@ -32,12 +32,20 @@ export const LOCAL_DEMO_PROFILE: UserProfile = {
 export const DEMO_PROFILE = LOCAL_DEMO_PROFILE;
 
 /**
- * Gets the current active Supabase session
+ * Gets the current active Supabase session.
+ *
+ * NOTE: supabase.auth.getSession() reads from localStorage which is
+ * unavailable during SSR (TanStack Start server pass). We therefore
+ * skip the call entirely on the server and rely on client-side
+ * hydration + router invalidation to enforce auth guards.
  */
 export async function getSession() {
+  // On the server there is no localStorage — always return null and let
+  // the client-side beforeLoad re-run after hydration.
+  if (typeof window === "undefined") return null;
+
   if (!isSupabaseConfigured) {
-    const isMockAuth =
-      typeof window !== "undefined" && localStorage.getItem("sahayak_auth") === "true";
+    const isMockAuth = localStorage.getItem("sahayak_auth") === "true";
     if (isMockAuth) {
       return { user: { id: DEMO_PROFILE.id, email: DEMO_PROFILE.email } };
     }
@@ -46,7 +54,18 @@ export async function getSession() {
 
   try {
     const { data, error } = await supabase.auth.getSession();
-    if (error || !data.session) return null;
+    if (error || !data.session) {
+      // Fallback: validate directly with the Supabase server. This handles
+      // cases where the local session storage is stale or the key format
+      // (sb_publishable_*) causes getSession to miss the cached token.
+      const { data: userData } = await supabase.auth.getUser();
+      if (userData?.user) {
+        // Re-fetch the full session after confirming the user is valid.
+        const { data: retryData } = await supabase.auth.getSession();
+        return retryData?.session ?? null;
+      }
+      return null;
+    }
     return data.session;
   } catch (err) {
     console.error("[Sahayak Auth] Failed to get session:", err);
@@ -95,9 +114,18 @@ export async function getCurrentProfile(): Promise<UserProfile | null> {
 }
 
 /**
- * Centralized Route Guard: Requires authentication for protected routes
+ * Centralized Route Guard: Requires authentication for protected routes.
+ *
+ * On the server (SSR pass) we intentionally skip the redirect — the
+ * server cannot read localStorage so getSession() always returns null
+ * there. TanStack Start will re-run beforeLoad on the client after
+ * hydration, at which point localStorage is available and the real
+ * session check fires.
  */
 export async function requireAuth() {
+  // Skip auth enforcement during SSR — localStorage is unavailable.
+  if (typeof window === "undefined") return null;
+
   const session = await getSession();
   if (!session) {
     throw redirect({
@@ -108,9 +136,13 @@ export async function requireAuth() {
 }
 
 /**
- * Centralized Route Guard: Requires admin role for /admin/* routes
+ * Centralized Route Guard: Requires admin role for /admin/* routes.
+ * Also SSR-safe — skips on the server, fires on the client after hydration.
  */
 export async function requireAdmin() {
+  // Skip auth enforcement during SSR — localStorage is unavailable.
+  if (typeof window === "undefined") return null;
+
   const session = await requireAuth();
   const profile = await getCurrentProfile();
 

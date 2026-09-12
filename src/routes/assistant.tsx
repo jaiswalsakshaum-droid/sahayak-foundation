@@ -183,15 +183,18 @@ export function AssistantPage() {
     setHasStarted(true);
     setActiveStepIndex(0);
     setShowResults(false);
+    setCandidateSchemes([]);
     setJourneySteps((prev) => prev.map((s) => ({ ...s, messages: [] })));
 
     // 1. Fetch matching schemes catalog via live service
     const intent = await understandCitizenNeed(text);
     const matched = await findRelevantSchemes(intent);
-    setCandidateSchemes(matched);
 
     // 2. Trigger real backend LangGraph orchestration run
-    await startRun(text);
+    const resRunId = await startRun(text);
+    if (resRunId) {
+      setCandidateSchemes(matched);
+    }
   };
 
   const handleRetry = () => {
@@ -392,7 +395,28 @@ export function AssistantPage() {
 
             {/* Schemes Results Column */}
             <div className="flex-1">
-              {showResults || candidateSchemes.length > 0 ? (
+              {status === "ERROR" ? (
+                <div className="flex h-[450px] flex-col items-center justify-center rounded-xl border border-coral/30 bg-card p-8 text-center shadow-sm">
+                  <AlertCircle className="size-12 text-coral mb-3" />
+                  <h3 className="text-lg font-semibold text-foreground font-display">
+                    {t("assistant.errorTitle", "Assistant Encountered an Issue")}
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-1 max-w-sm">
+                    {t(
+                      "assistant.errorDesc",
+                      "Unable to complete agent workflow. Please check your connection and try again.",
+                    )}
+                  </p>
+                  <Button
+                    onClick={handleRetry}
+                    className="mt-5 gap-1.5 bg-brand hover:bg-brand/90"
+                    size="sm"
+                  >
+                    <RefreshCw className="size-3.5" />
+                    {t("assistant.retry", "Retry Run")}
+                  </Button>
+                </div>
+              ) : showResults || candidateSchemes.length > 0 ? (
                 <div className="space-y-6">
                   <div className="flex items-center justify-between">
                     <h2 className="text-xl font-display font-semibold">

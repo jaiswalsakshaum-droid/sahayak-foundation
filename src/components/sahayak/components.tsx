@@ -350,31 +350,47 @@ export function DocumentCard({
   );
 }
 
-export function ApplicationTimeline() {
-  const items = [
+export function ApplicationTimeline({
+  items,
+}: {
+  items?: Array<[string, string, Status]>;
+}) {
+  const defaultItems: Array<[string, string, Status]> = [
     [
-      "Eligibility confirmed",
-      "Eligibility Agent · 2 days ago · 94% confidence",
-      "complete" as Status,
+      "Eligibility check",
+      "Eligibility Agent · Discover schemes with Assistant",
+      "idle" as Status,
     ],
     [
-      "5 of 6 documents verified",
-      "Document Agent · Yesterday · DigiLocker connected",
-      "complete" as Status,
+      "Document verification",
+      "Document Agent · Upload credentials in Document Center",
+      "idle" as Status,
     ],
     [
-      "Enrollment certificate required",
-      "Tracker Agent · Now · Blocks submission",
-      "warning" as Status,
+      "Citizen consent & review",
+      "Application Agent · Awaiting application start",
+      "idle" as Status,
     ],
-    ["Final submission", "Application Agent · Waiting for your approval", "idle" as Status],
   ];
+
+  const displayItems = items !== undefined ? items : defaultItems;
+
+  if (displayItems.length === 0) {
+    return (
+      <Card className="border-line bg-card shadow-none">
+        <CardContent className="p-5 text-center text-xs text-muted-foreground">
+          No active timeline milestones yet. Start an application with Assistant to begin.
+        </CardContent>
+      </Card>
+    );
+  }
+
   return (
     <Card className="border-line bg-card shadow-none">
       <CardContent className="p-5">
         <div className="relative space-y-5 pl-5">
           <span className="absolute bottom-2 left-[7px] top-2 w-px bg-mist" />
-          {items.map(([title, detail, tone]) => (
+          {displayItems.map(([title, detail, tone]) => (
             <div className="relative" key={title}>
               <span
                 className={cn(
@@ -497,7 +513,7 @@ export function NextBestAction({ compact = false }: { compact?: boolean }) {
               variant="ghost"
               className="text-primary-foreground hover:bg-primary-foreground/10 hover:text-primary-foreground"
             >
-              <Link to="/applications/nmmse-2024">View application</Link>
+              <Link to="/applications">View applications</Link>
             </Button>
           </div>
         </div>

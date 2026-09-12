@@ -393,22 +393,56 @@ export async function validateDocument(
       );
     }
 
-    // Fire extraction Edge Function asynchronously for Groq Vision OCR
+    // Fire Groq Vision extraction asynchronously.
+    //
+    // LOCAL DEV: Set VITE_BACKEND_URL in .env to your localtunnel URL
+    // (e.g. https://smart-walls-drive.loca.lt) and the frontend will call
+    // your local backend directly — no Supabase edge function needed.
+    //
+    // PRODUCTION: Leave VITE_BACKEND_URL unset; it will call the Supabase
+    // edge function instead (which proxies to RENDER_BACKEND_URL).
     if (uploadedPath) {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
-      const edgeFunctionUrl = `${supabaseUrl}/functions/v1/extract-document`;
+      const supabaseUrl = import.meta.env["VITE_SUPABASE_URL"] || "";
+      const { data: freshSession } = await supabase.auth.getSession();
+      const accessToken = freshSession?.session?.access_token || "";
 
-      fetch(edgeFunctionUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token || ""}`,
-          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY || "",
-        },
-        body: JSON.stringify({ document_id: insertedDoc.id }),
-      }).catch((dispatchErr) => {
-        console.warn("[Sahayak] extract-document dispatch notice:", dispatchErr);
-      });
+      // Always dispatch via Supabase Edge Function (server-to-server dispatch has zero CORS issues)
+      if (accessToken && supabaseUrl) {
+        console.info("[Sahayak] Dispatching extraction via Supabase Edge Function...");
+        fetch(`${supabaseUrl}/functions/v1/extract-document`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+            apikey: import.meta.env["VITE_SUPABASE_ANON_KEY"] || "",
+          },
+          body: JSON.stringify({ document_id: insertedDoc.id }),
+        })
+          .then(async (res) => {
+            if (!res.ok) {
+              const body = await res.text().catch(() => "(unreadable)");
+              console.warn(`[Sahayak] Edge function returned ${res.status}:`, body);
+            } else {
+              console.info("[Sahayak] Edge function accepted extraction request.");
+            }
+          })
+          .catch((err) => console.warn("[Sahayak] Edge function dispatch error:", err));
+      } else {
+        // Direct local backend fallback if direct URL configured
+        const backendUrl = import.meta.env["VITE_BACKEND_URL"];
+        const internalSecret = import.meta.env["VITE_INTERNAL_SECRET"] || "sahayak_dev_secret_123";
+        if (backendUrl) {
+          fetch(`${backendUrl}/extract-document`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Sahayak-Internal-Secret": internalSecret,
+              "bypass-tunnel-reminder": "true",
+            },
+            body: JSON.stringify({ document_id: insertedDoc.id }),
+          }).catch((err) => console.warn("[Sahayak] Direct backend dispatch failed:", err));
+        }
+      }
     }
 
     return ok({
@@ -427,6 +461,48 @@ export async function validateDocument(
     });
   } catch (e: any) {
     return err(`Unexpected document processing error: ${e.message || e}`);
+  }
+}
+
+/**
+ * Delete a citizen's document from the database and storage.
+ */
+export async function deleteUserDocument(documentId: string): Promise<ServiceResult<{ success: boolean }>> {
+  if (!isSupabaseConfigured) {
+    return ok({ success: true });
+  }
+
+  try {
+    const session = await getSession();
+    if (!session?.user?.id) {
+      return err("Authentication session required to delete document.");
+    }
+
+    const { data: doc } = await supabase
+      .from("documents")
+      .select("id, file_path, citizen_id")
+      .eq("id", documentId)
+      .single();
+
+    if (doc && doc.citizen_id === session.user.id) {
+      if (doc.file_path) {
+        await supabase.storage.from("documents").remove([doc.file_path]).catch(() => {});
+      }
+    }
+
+    const { error } = await supabase
+      .from("documents")
+      .delete()
+      .eq("id", documentId)
+      .eq("citizen_id", session.user.id);
+
+    if (error) {
+      return err(error.message || "Failed to delete document.");
+    }
+
+    return ok({ success: true });
+  } catch (e: any) {
+    return err(e?.message || "Failed to delete document.");
   }
 }
 
@@ -622,16 +698,24 @@ export async function submitApplication(
   }
 
   try {
-    const { data: updatedApp, error } = await supabase
-      .from("applications")
-      .update({
-        status: "submitted",
-        tracking_id: generatedTrackingId,
-        updated_at: new Date().toISOString(),
-      })
-      .or(`tracking_id.eq.${applicationId},id.eq.${applicationId}`)
+    const isUuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(applicationId);
+
+    let updateQuery = supabase.from("applications").update({
+      status: "submitted",
+      tracking_id: generatedTrackingId,
+      updated_at: new Date().toISOString(),
+    });
+
+    if (isUuid) {
+      updateQuery = updateQuery.eq("id", applicationId);
+    } else {
+      updateQuery = updateQuery.eq("tracking_id", applicationId);
+    }
+
+    const { data: updatedApp, error } = await updateQuery
       .select("tracking_id, citizen_id, scheme_id, schemes(name)")
-      .single();
+      .maybeSingle();
 
     if (error || !updatedApp) {
       return err(`Submission failed: ${error?.message || "Application not found"}`);
