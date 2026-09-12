@@ -5,6 +5,8 @@ import {
   AlertTriangle,
   FileWarning,
   ArrowRight,
+  ArrowLeft,
+  ChevronRight,
   Info,
   Loader2,
   CheckCheck,
@@ -12,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { AppShell } from "@/components/sahayak";
 import { requireAuth, getSession } from "@/lib/auth";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
@@ -101,20 +104,28 @@ function NotificationsPage() {
           .order("created_at", { ascending: false });
 
         if (!error && active) {
-          const mapped: NotificationItem[] = (data || []).map((n: any) => ({
-            id: n.id,
-            title: n.title,
-            message: n.body || "",
-            type: (n.type as any) || "info",
-            time: n.created_at ? new Date(n.created_at).toLocaleDateString() : "Recently",
-            unread: !n.is_read,
-            actionLink: "/applications",
-            actionLabel: "View Details",
-          }));
+          const mapped: NotificationItem[] = (data || []).map((row: any) => {
+            const rawType = row.type || "info";
+            const type: NotificationItem["type"] =
+              rawType === "critical" || rawType === "warning" || rawType === "success"
+                ? rawType
+                : "info";
+
+            return {
+              id: row.id,
+              title: row.title || "Notification",
+              message: row.body || row.message || "",
+              type,
+              time: row.created_at ? new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Recently",
+              unread: !row.is_read,
+              actionLabel: row.action_label,
+              actionLink: row.action_link,
+            };
+          });
           setNotifications(mapped);
         }
       } catch (err) {
-        console.warn("[Notifications] Error loading notifications:", err);
+        console.warn("[Notifications] Failed to load notifications:", err);
       } finally {
         if (active) setLoading(false);
       }
@@ -182,43 +193,35 @@ function NotificationsPage() {
   const unreadCount = notifications.filter((n) => n.unread).length;
 
   return (
-    <div className="min-h-screen bg-ice-2 text-foreground flex flex-col">
-      <header className="sticky top-0 z-30 border-b border-line bg-ice-2/90 backdrop-blur-sm">
-        <div className="mx-auto flex h-16 max-w-5xl items-center px-5">
-          <Link to="/" className="flex items-center gap-2 mr-6 text-foreground hover:text-brand">
-            <span className="grid size-8 place-items-center rounded-lg bg-brand font-display text-sm font-semibold text-primary-foreground">
-              S
-            </span>
-            <span className="font-display font-semibold hidden sm:block">Sahayak</span>
+    <AppShell>
+      <div className="space-y-6">
+        {/* Top Breadcrumb & Navigation */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link
+            to="/dashboard"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-ice hover:text-foreground transition-colors shadow-sm"
+          >
+            <ArrowLeft className="size-3.5" /> Back to Dashboard
           </Link>
-          <nav className="flex items-center gap-6 text-sm font-medium">
-            <Link to="/assistant" className="text-muted-foreground hover:text-foreground">
-              Assistant
-            </Link>
-            <Link to="/schemes" className="text-muted-foreground hover:text-foreground">
-              Schemes
-            </Link>
-            <Link to="/documents" className="text-muted-foreground hover:text-foreground">
-              Documents
-            </Link>
-            <Link to="/applications" className="text-muted-foreground hover:text-foreground">
-              Applications
-            </Link>
-          </nav>
+          <div className="flex items-center gap-2 text-[11px] text-brand-soft">
+            <span className="size-1.5 animate-pulse-dot rounded-full bg-sage" />
+            Tracker Agent · Live Civic Alerts
+          </div>
         </div>
-      </header>
 
-      <main className="flex-1 mx-auto w-full max-w-3xl px-5 py-10">
         {!isSupabaseConfigured && (
-          <div className="mb-6 rounded-xl border border-amber/30 bg-amber/10 p-3 text-xs text-amber flex items-center justify-between">
+          <div className="rounded-xl border border-amber/30 bg-amber/10 p-3 text-xs text-amber flex items-center justify-between">
             <span>Demo mode active — displaying sample notification feed.</span>
             <span className="font-semibold uppercase tracking-wider text-[10px]">Demo</span>
           </div>
         )}
 
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-display font-semibold mb-1">Notifications</h1>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-mist bg-card px-2.5 py-0.5 text-xs font-medium text-brand-soft">
+              <Bell className="size-3.5 text-brand" /> Notifications & Alerts
+            </span>
+            <h1 className="text-3xl font-display font-semibold mt-2 mb-1">Notifications</h1>
             <p className="text-muted-foreground text-sm">
               Stay updated on your applications, verification milestones, and AI workforce actions.
             </p>
@@ -309,7 +312,19 @@ function NotificationsPage() {
             ))}
           </div>
         )}
-      </main>
-    </div>
+
+        {/* Ecosystem Connection Footer */}
+        <div className="rounded-xl border border-line bg-card p-4 text-xs text-muted-foreground flex flex-wrap items-center justify-between gap-2 mt-8">
+          <span className="font-medium text-foreground">
+            Connected live to UMANG, myScheme & State Benefit portals for real-time tracking.
+          </span>
+          <Button asChild variant="link" size="sm" className="px-1 text-xs text-brand">
+            <Link to="/profile">
+              Notification Preferences <ArrowRight className="size-3 ml-0.5" />
+            </Link>
+          </Button>
+        </div>
+      </div>
+    </AppShell>
   );
 }

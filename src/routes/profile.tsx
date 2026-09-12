@@ -11,13 +11,15 @@ import {
   Save,
   X,
   Loader2,
+  ArrowLeft,
+  Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { ConsentModal } from "@/components/sahayak";
+import { ConsentModal, AppShell } from "@/components/sahayak";
 import { requireAuth, getCurrentProfile, type UserProfile } from "@/lib/auth";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
@@ -98,7 +100,7 @@ function ProfilePage() {
         if (error) throw error;
       }
 
-      setProfile((prev) => (prev ? { ...prev, ...updates } : null));
+      setProfile((prev) => (prev ? ({ ...prev, ...updates } as any) : null));
       setIsEditing(false);
       toast.success("Profile updated successfully");
     } catch (err: any) {
@@ -112,34 +114,27 @@ function ProfilePage() {
     .split(" ")
     .filter(Boolean)
     .slice(0, 2)
-    .map((n) => n[0].toUpperCase())
+    .map((n) => (n[0] || "").toUpperCase())
     .join("");
 
   return (
-    <div className="min-h-screen bg-ice-2 text-foreground flex flex-col">
-      <header className="sticky top-0 z-30 border-b border-line bg-ice-2/90 backdrop-blur-sm">
-        <div className="mx-auto flex h-16 max-w-5xl items-center px-5">
-          <Link to="/" className="flex items-center gap-2 mr-6 text-foreground hover:text-brand">
-            <span className="grid size-8 place-items-center rounded-lg bg-brand font-display text-sm font-semibold text-primary-foreground">
-              S
-            </span>
-            <span className="font-display font-semibold hidden sm:block">Sahayak</span>
+    <AppShell>
+      <div className="space-y-6 max-w-4xl">
+        {/* Navigation Breadcrumb / Top Bar */}
+        <div className="flex items-center justify-between">
+          <Link
+            to="/dashboard"
+            className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors group"
+          >
+            <ArrowLeft className="size-3.5 transition-transform group-hover:-translate-x-0.5" />
+            <span>Back to Dashboard</span>
           </Link>
-          <nav className="flex items-center gap-6 text-sm font-medium">
-            <Link to="/assistant" className="text-muted-foreground hover:text-foreground">
-              Assistant
-            </Link>
-            <Link to="/documents" className="text-muted-foreground hover:text-foreground">
-              Documents
-            </Link>
-            <Link to="/applications" className="text-muted-foreground hover:text-foreground">
-              Applications
-            </Link>
-          </nav>
+          <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground bg-card px-2.5 py-1 rounded-full border border-line">
+            <span className="size-1.5 rounded-full bg-sage animate-pulse" />
+            Citizen Agent · Identity Vault
+          </div>
         </div>
-      </header>
 
-      <main className="flex-1 mx-auto w-full max-w-3xl px-5 py-10 space-y-8">
         {!isSupabaseConfigured && (
           <div className="rounded-xl border border-amber/30 bg-amber/10 p-3 text-xs text-amber flex items-center justify-between">
             <span>Demo mode active — running with local mock fallback profile.</span>
@@ -147,15 +142,17 @@ function ProfilePage() {
           </div>
         )}
 
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-display font-semibold mb-2">Citizen Profile</h1>
-            <p className="text-muted-foreground">
-              Manage your identity, ecosystem integrations, and consent preferences.
+            <h1 className="text-3xl font-display font-semibold tracking-tight text-foreground">
+              Citizen Profile
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Manage your verified identity, ecosystem integrations, and consent preferences.
             </p>
           </div>
-          <Button variant="outline" onClick={() => setConsentOpen(true)}>
-            <ShieldCheck className="mr-2 size-4" />
+          <Button variant="outline" size="sm" onClick={() => setConsentOpen(true)} className="self-start sm:self-auto">
+            <ShieldCheck className="mr-2 size-4 text-sage" />
             Privacy & Consent
           </Button>
         </div>
@@ -322,9 +319,21 @@ function ProfilePage() {
             />
           </div>
         </div>
+
+        {/* Security / Ecosystem footer */}
+        <div className="rounded-xl border border-line bg-card/60 p-4 text-xs text-muted-foreground flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Lock className="size-4 text-sage" />
+            <span>Profile and identity attributes are encrypted end-to-end and shared only with verified civic schemes upon citizen consent.</span>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => setConsentOpen(true)} className="h-7 text-xs text-brand font-medium">
+            Manage Consent
+          </Button>
+        </div>
+
         <ConsentModal open={consentOpen} onClose={() => setConsentOpen(false)} />
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }
 

@@ -6,6 +6,7 @@ import {
   Bot,
   CheckCircle2,
   ChevronLeft,
+  ChevronRight,
   FileText,
   AlertTriangle,
   FileWarning,
@@ -15,12 +16,14 @@ import {
   Square,
   Loader2,
   ArrowRight,
+  ArrowLeft,
+  FileCheck2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { requireAuth, getCurrentProfile, type UserProfile } from "@/lib/auth";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { recordConsent, submitApplication, getApplicationStatus } from "@/lib/services";
-import { LanguageSwitcher } from "@/components/sahayak";
+import { AppShell } from "@/components/sahayak";
 
 export const Route = createFileRoute("/applications/$id")({
   beforeLoad: async () => {
@@ -97,31 +100,28 @@ export function ApplicationDetailPage() {
               const { data: citizenDocs } = await supabase
                 .from("documents")
                 .select("document_type, status")
-                .eq("citizen_id", userProfile.id)
-                .eq("status", "verified");
+                .eq("citizen_id", userProfile.id);
 
               const verifiedTypes = new Set(
-                (citizenDocs || []).map((d) => d.document_type.toLowerCase()),
+                (citizenDocs || [])
+                  .filter((d) => d.status === "verified")
+                  .map((d) => d.document_type.toLowerCase()),
               );
 
-              const schemeReqs = (appData.schemes as any)?.document_requirements || [];
-              const missing = schemeReqs
-                .filter(
-                  (req: any) =>
-                    req.is_mandatory && !verifiedTypes.has(req.document_type.toLowerCase()),
-                )
-                .map((req: any) => req.document_type);
+              const reqs = (appData.schemes as any)?.document_requirements || [];
+              const missing = reqs
+                .filter((r: any) => r.is_mandatory && !verifiedTypes.has(r.document_type.toLowerCase()))
+                .map((r: any) => r.document_type);
 
               setMissingRequirements(missing);
             }
 
-            // Load timeline
             const statusInfo = await getApplicationStatus(appData.tracking_id || appData.id);
             setTimeline(statusInfo.timeline);
           }
         }
       } catch (err) {
-        console.warn("[Application Detail] Error loading application:", err);
+        console.error("[Applications] Failed to load application details:", err);
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -139,20 +139,24 @@ export function ApplicationDetailPage() {
     application?.status === "approved";
 
   const handleApproveAndSubmit = async () => {
-    if (!consentChecked || missingRequirements.length > 0 || isSubmitted) return;
+    if (!application?.id || !profile?.id) return;
     setSubmitting(true);
 
     try {
-      const appId = application?.id || id;
-      await recordConsent(appId);
-      const submitRes = await submitApplication(appId);
+      // 1. Record explicit citizen consent
+      await recordConsent(
+        application.id,
+        "I authorize Sahayak AI to submit this application with verified credentials on my behalf.",
+      );
+
+      // 2. Submit application
+      const submitRes = await submitApplication(application.id);
 
       if (submitRes.ok) {
-        toast.success(t("applications.submissionSuccess", "Application submitted successfully!"), {
-          description: t("applications.trackingId", { id: submitRes.data.trackingId }),
+        toast.success("Application submitted successfully!", {
+          description: `Tracking ID: ${submitRes.data.trackingId}`,
         });
 
-        // Update local state in-place
         setApplication((prev: any) => ({
           ...prev,
           status: "submitted",
@@ -192,25 +196,31 @@ export function ApplicationDetailPage() {
   };
 
   return (
-    <div className="min-h-screen bg-ice-2 text-foreground flex flex-col">
-      <header className="sticky top-0 z-30 border-b border-line bg-ice-2/90 backdrop-blur-sm">
-        <div className="mx-auto flex h-16 max-w-5xl items-center px-5">
-          <Link
-            to="/applications"
-            className="flex items-center gap-2 mr-6 text-muted-foreground hover:text-foreground text-sm font-medium"
-          >
-            <ChevronLeft className="size-4" /> {t("nav.applications", "Back to Applications")}
-          </Link>
-          <div className="ml-auto flex items-center gap-3">
-            <LanguageSwitcher />
-            <span className="grid size-8 place-items-center rounded-lg bg-brand text-sm font-semibold text-primary-foreground">
-              <Bot className="size-4" />
-            </span>
+    <AppShell>
+      <div className="space-y-6">
+        {/* Top Breadcrumb & Navigation */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Link
+              to="/applications"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-ice hover:text-foreground transition-colors shadow-sm"
+            >
+              <ChevronLeft className="size-3.5" /> Back to Applications
+            </Link>
+            <Link
+              to="/dashboard"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-ice hover:text-foreground transition-colors shadow-sm"
+            >
+              <ArrowLeft className="size-3.5" /> Dashboard
+            </Link>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-brand-soft">
+            <span className="size-1.5 animate-pulse-dot rounded-full bg-sage" />
+            Human-in-the-Loop Sign-off
           </div>
         </div>
-      </header>
 
-      <main className="flex-1 mx-auto w-full max-w-5xl px-5 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
         {/* LEFT COLUMN: Summary & Progress Timeline */}
         <div className="lg:col-span-4 space-y-6">
           <div className="bg-card rounded-xl border border-line p-5 shadow-none space-y-4">
@@ -413,7 +423,23 @@ export function ApplicationDetailPage() {
             </div>
           )}
         </div>
-      </main>
-    </div>
+        </div>
+
+        {/* Ecosystem Connection Footer */}
+        <div className="rounded-xl border border-line bg-card p-4 text-xs text-muted-foreground flex flex-wrap items-center justify-between gap-2 mt-8">
+          <span className="font-medium text-foreground">
+            {t(
+              "dashboard.connectedEcosystem",
+              "Your connected ecosystem: Sahayak works alongside myScheme, UMANG and DigiLocker — it never replaces them.",
+            )}
+          </span>
+          <Button asChild variant="link" size="sm" className="px-1 text-xs text-brand">
+            <Link to="/profile">
+              {t("dashboard.manageConnections", "Manage connections")} <ChevronRight className="size-3 ml-0.5" />
+            </Link>
+          </Button>
+        </div>
+      </div>
+    </AppShell>
   );
 }

@@ -157,10 +157,10 @@ export function useAgentRun() {
     const generatedRunId = `run-${Date.now()}`;
     setRunId(generatedRunId);
 
-    // 9-second safety timeout — if nothing comes back, surface an error instead of an infinite spinner
+    // 45-second safety timeout — multi-agent LangGraph workflow coordinates 6 specialized LLM agents
     timeoutRef.current = setTimeout(() => {
       setStatus("ERROR");
-    }, 9000);
+    }, 45000);
 
     if (isSupabaseConfigured) {
       try {

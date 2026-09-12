@@ -21,6 +21,7 @@ import {
   ChevronRight,
   X,
   Trash2,
+  ArrowLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,6 +35,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
+import { AppShell } from "@/components/sahayak";
 import { validateDocument, deleteUserDocument, type DocumentValidationResult } from "@/lib/services";
 import { requireAuth, getSession } from "@/lib/auth";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
@@ -343,31 +345,46 @@ function DocumentsPage() {
   const verifiedDocs = documentsList.filter((d) => ["Verified", "verified"].includes(d.status));
 
   return (
-    <div className="min-h-screen bg-ice-2 text-foreground flex flex-col">
-      <main className="flex-1 mx-auto w-full max-w-6xl px-4 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column */}
-        <div className="lg:col-span-7 space-y-6">
-          {!isSupabaseConfigured && (
-            <div className="rounded-xl border border-amber/30 bg-amber/10 p-3 text-xs text-amber flex items-center justify-between">
-              <span>Demo mode active — displaying sample document fixtures.</span>
-              <span className="font-semibold uppercase tracking-wider text-[10px]">Demo</span>
-            </div>
-          )}
-
-          <div>
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-mist bg-card px-2.5 py-0.5 text-xs font-medium text-brand-soft">
-              <ShieldCheck className="size-3.5 text-brand" /> Document Agent · Verifiable Evidence
-            </span>
-            <h1 className="text-3xl font-display font-semibold mt-2 mb-1">
-              {t("documents.title", "Document Vault")}
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              {t(
-                "documents.subtitle",
-                "Upload and manage credentials verified by Sahayak's multimodal Document Agent.",
-              )}
-            </p>
+    <AppShell>
+      <div className="space-y-6">
+        {/* Top Breadcrumb & Navigation */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link
+            to="/dashboard"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-ice hover:text-foreground transition-colors shadow-sm"
+          >
+            <ArrowLeft className="size-3.5" /> Back to Dashboard
+          </Link>
+          <div className="flex items-center gap-2 text-[11px] text-brand-soft">
+            <span className="size-1.5 animate-pulse-dot rounded-full bg-sage" />
+            Document Agent · Verifiable Vault
           </div>
+        </div>
+
+        {!isSupabaseConfigured && (
+          <div className="rounded-xl border border-amber/30 bg-amber/10 p-3 text-xs text-amber flex items-center justify-between">
+            <span>Demo mode active — displaying sample document fixtures.</span>
+            <span className="font-semibold uppercase tracking-wider text-[10px]">Demo</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
+          {/* Left Column */}
+          <div className="xl:col-span-7 space-y-6">
+            <div>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-mist bg-card px-2.5 py-0.5 text-xs font-medium text-brand-soft">
+                <ShieldCheck className="size-3.5 text-brand" /> Document Agent · Verifiable Evidence
+              </span>
+              <h1 className="text-3xl font-display font-semibold mt-2 mb-1">
+                {t("documents.title", "Document Vault")}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                {t(
+                  "documents.subtitle",
+                  "Upload and manage credentials verified by Sahayak's multimodal Document Agent.",
+                )}
+              </p>
+            </div>
 
           {activeScheme && checklistStatus && (
             <div className="rounded-2xl border-2 border-brand/20 bg-card p-5 shadow-sm space-y-4">
@@ -600,7 +617,7 @@ function DocumentsPage() {
         </div>
 
         {/* Right Column — Upload Panel */}
-        <div className="lg:col-span-5 space-y-6">
+        <div className="xl:col-span-5 space-y-6">
           <div className="rounded-2xl border border-line bg-card p-6 shadow-sm sticky top-24">
             <div className="flex items-start justify-between mb-4">
               <div>
@@ -921,7 +938,23 @@ function DocumentsPage() {
             )}
           </div>
         </div>
-      </main>
+        </div>
+
+        {/* Ecosystem Connection Footer */}
+        <div className="rounded-xl border border-line bg-card p-4 text-xs text-muted-foreground flex flex-wrap items-center justify-between gap-2 mt-8">
+          <span className="font-medium text-foreground">
+            {t(
+              "dashboard.connectedEcosystem",
+              "Your connected ecosystem: Sahayak works alongside myScheme, UMANG and DigiLocker — it never replaces them.",
+            )}
+          </span>
+          <Button asChild variant="link" size="sm" className="px-1 text-xs text-brand">
+            <Link to="/profile">
+              {t("dashboard.manageConnections", "Manage connections")} <ChevronRight className="size-3 ml-0.5" />
+            </Link>
+          </Button>
+        </div>
+      </div>
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={Boolean(docToDelete)} onOpenChange={(open) => !open && !isDeleting && setDocToDelete(null)}>
@@ -960,6 +993,6 @@ function DocumentsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </AppShell>
   );
 }

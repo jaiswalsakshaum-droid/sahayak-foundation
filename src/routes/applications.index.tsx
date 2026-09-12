@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Bot, ChevronRight, FileText, Clock, Plus, Loader2, FolderOpen } from "lucide-react";
+import { Bot, ChevronRight, FileText, Clock, Plus, Loader2, FolderOpen, ArrowLeft, FileCheck2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { AppShell } from "@/components/sahayak";
 import { requireAuth, getSession } from "@/lib/auth";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { CANONICAL_SCHEME_LIST } from "@/lib/scheme-constants";
@@ -109,18 +110,35 @@ function ApplicationsPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-ice-2 text-foreground flex flex-col">
-      <main className="flex-1 mx-auto w-full max-w-5xl px-5 py-10">
+    <AppShell>
+      <div className="space-y-6">
+        {/* Top Breadcrumb & Navigation */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link
+            to="/dashboard"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-ice hover:text-foreground transition-colors shadow-sm"
+          >
+            <ArrowLeft className="size-3.5" /> Back to Dashboard
+          </Link>
+          <div className="flex items-center gap-2 text-[11px] text-brand-soft">
+            <span className="size-1.5 animate-pulse-dot rounded-full bg-sage" />
+            Application Agent · Human-in-the-Loop Hub
+          </div>
+        </div>
+
         {!isSupabaseConfigured && (
-          <div className="mb-6 rounded-xl border border-amber/30 bg-amber/10 p-3 text-xs text-amber flex items-center justify-between">
+          <div className="rounded-xl border border-amber/30 bg-amber/10 p-3 text-xs text-amber flex items-center justify-between">
             <span>Demo mode active — displaying sample application fixtures.</span>
             <span className="font-semibold uppercase tracking-wider text-[10px]">Demo</span>
           </div>
         )}
 
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-display font-semibold mb-1">My Applications</h1>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-mist bg-card px-2.5 py-0.5 text-xs font-medium text-brand-soft">
+              <FileCheck2 className="size-3.5 text-brand" /> Applications & Portals
+            </span>
+            <h1 className="text-3xl font-display font-semibold mt-2 mb-1">My Applications</h1>
             <p className="text-muted-foreground text-sm">
               Review drafts prepared by Sahayak, provide human consent, and track official status.
             </p>
@@ -133,12 +151,12 @@ function ApplicationsPage() {
         </div>
 
         {loading ? (
-          <div className="bg-card rounded-xl border border-line p-12 text-center text-sm text-muted-foreground shadow-sm">
+          <div className="bg-card rounded-2xl border border-line p-12 text-center text-sm text-muted-foreground shadow-sm">
             <Loader2 className="size-6 animate-spin mx-auto mb-2 text-brand" />
             Loading applications...
           </div>
         ) : applications.length === 0 ? (
-          <div className="bg-card rounded-xl border border-dashed border-line p-12 text-center shadow-sm">
+          <div className="bg-card rounded-2xl border border-dashed border-line p-12 text-center shadow-sm">
             <FolderOpen className="size-10 mx-auto mb-3 text-muted-foreground/50" />
             <h3 className="font-semibold text-foreground text-base">No active applications yet</h3>
             <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto mb-6">
@@ -155,13 +173,14 @@ function ApplicationsPage() {
             {applications.map((app) => (
               <Link
                 key={app.id}
-                to={`/applications/${app.id}`}
-                className="block bg-card rounded-xl border border-line p-6 hover:border-brand/50 transition-all group shadow-sm"
+                to="/applications/$id"
+                params={{ id: app.id }}
+                className="block bg-card rounded-2xl border border-line p-6 hover:border-brand/50 hover:shadow-md transition-all group shadow-sm"
               >
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex items-start gap-4">
                     <div
-                      className={`grid size-12 place-items-center rounded-lg mt-1 ${
+                      className={`grid size-12 place-items-center rounded-xl mt-1 ${
                         app.actionReady ? "bg-amber/10 text-amber" : "bg-brand/10 text-brand"
                       }`}
                     >
@@ -206,7 +225,19 @@ function ApplicationsPage() {
             ))}
           </div>
         )}
-      </main>
-    </div>
+
+        {/* Ecosystem Connection Footer */}
+        <div className="rounded-xl border border-line bg-card p-4 text-xs text-muted-foreground flex flex-wrap items-center justify-between gap-2 mt-8">
+          <span className="font-medium text-foreground">
+            Your connected ecosystem: Sahayak works alongside myScheme, UMANG and DigiLocker — it never replaces them.
+          </span>
+          <Button asChild variant="link" size="sm" className="px-1 text-xs text-brand">
+            <Link to="/profile">
+              Manage connections <ChevronRight className="size-3 ml-0.5" />
+            </Link>
+          </Button>
+        </div>
+      </div>
+    </AppShell>
   );
 }

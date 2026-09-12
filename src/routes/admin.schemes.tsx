@@ -14,6 +14,7 @@ import {
   Loader2,
   RefreshCw,
   FileCheck,
+  ArrowLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { requireAdmin } from "@/lib/auth";
@@ -118,6 +119,14 @@ function AdminSchemesPage() {
               Knowledge Base
             </Link>
           </nav>
+          <div className="ml-auto flex items-center gap-3">
+            <Button asChild size="sm" variant="ghost" className="text-xs text-muted-foreground hover:text-foreground">
+              <Link to="/dashboard" className="gap-1.5 flex items-center">
+                <ArrowLeft className="size-3.5" />
+                <span>Dashboard</span>
+              </Link>
+            </Button>
+          </div>
         </div>
       </header>
 

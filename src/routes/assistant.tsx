@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ArrowRight,
+  ArrowLeft,
   Bot,
   CheckCircle2,
   ChevronRight,
@@ -29,7 +30,7 @@ import {
   checkEligibility,
   type SchemeMatch,
 } from "@/lib/services";
-import { LanguageSwitcher } from "@/components/sahayak";
+import { AppShell } from "@/components/sahayak";
 
 export const Route = createFileRoute("/assistant")({
   beforeLoad: async () => {
@@ -50,6 +51,7 @@ export function AssistantPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [input, setInput] = useState("");
+  const [activeQuery, setActiveQuery] = useState("");
   const [hasStarted, setHasStarted] = useState(false);
   const [activeStepIndex, setActiveStepIndex] = useState(-1);
   const [showResults, setShowResults] = useState(false);
@@ -112,12 +114,10 @@ export function AssistantPage() {
     "Mujhe scholarship ke liye apply karna hai.",
   ];
 
-  // Sync incoming Realtime events into journey step messages
+  // Update journey steps from agent_events log
   useEffect(() => {
-    if (events.length === 0) return;
-
     events.forEach((ev) => {
-      const agentLower = ev.agent_name.toLowerCase();
+      const agentLower = (ev.agent_name || (ev as any).agent || "").toLowerCase();
       let stepIdx = -1;
       if (agentLower.includes("citizen")) stepIdx = 0;
       else if (agentLower.includes("scheme")) stepIdx = 1;
@@ -129,10 +129,11 @@ export function AssistantPage() {
       if (stepIdx !== -1) {
         setJourneySteps((prev) => {
           const copy = [...prev];
-          if (!copy[stepIdx].messages.includes(ev.action)) {
+          const target = copy[stepIdx];
+          if (target && !target.messages.includes(ev.action)) {
             copy[stepIdx] = {
-              ...copy[stepIdx],
-              messages: [...copy[stepIdx].messages, ev.action],
+              ...target,
+              messages: [...target.messages, ev.action],
             };
           }
           return copy;
@@ -145,9 +146,10 @@ export function AssistantPage() {
     }
 
     // Process candidate schemes payload if returned in event details
-    if (latestData?.candidate_schemes && Array.isArray(latestData.candidate_schemes)) {
+    const candSchemes = (latestData as any)?.candidate_schemes;
+    if (candSchemes && Array.isArray(candSchemes)) {
       setCandidateSchemes(
-        latestData.candidate_schemes.map((s: any) => ({
+        candSchemes.map((s: any) => ({
           id: s.id,
           name: s.name,
           category: s.category || "General",
@@ -164,7 +166,7 @@ export function AssistantPage() {
     if (status === "ACTION_REQUIRED" || status === "COMPLETED") {
       setShowResults(true);
     }
-  }, [events, activeAgentIndex, status, latestData]);
+  }, [events, activeAgentIndex, latestData, status]);
 
   // Load criteria when a scheme is selected in dialog
   useEffect(() => {
@@ -179,14 +181,14 @@ export function AssistantPage() {
 
   const handleSend = async (text: string) => {
     if (!text.trim()) return;
-    setInput(text);
+    setActiveQuery(text);
+    setInput("");
     setHasStarted(true);
-    setActiveStepIndex(0);
     setShowResults(false);
     setCandidateSchemes([]);
     setJourneySteps((prev) => prev.map((s) => ({ ...s, messages: [] })));
 
-    // 1. Fetch matching schemes catalog via live service
+    // 1. Initial quick matching for instant UI feedback
     const intent = await understandCitizenNeed(text);
     const matched = await findRelevantSchemes(intent);
 
@@ -198,42 +200,31 @@ export function AssistantPage() {
   };
 
   const handleRetry = () => {
-    if (input) {
+    if (activeQuery) {
+      handleSend(activeQuery);
+    } else if (input) {
       handleSend(input);
     }
   };
 
   return (
-    <div className="min-h-screen bg-ice-2 text-foreground flex flex-col">
-      <header className="sticky top-0 z-30 border-b border-line bg-ice-2/90 backdrop-blur-sm">
-        <div className="mx-auto flex h-16 max-w-5xl items-center px-5">
-          <div className="flex items-center gap-4 w-full">
-            <Link to="/dashboard" className="text-muted-foreground hover:text-foreground">
-              <span className="grid size-8 place-items-center rounded-lg bg-card border border-line">
-                <ArrowRight className="size-4 rotate-180" />
-              </span>
-            </Link>
-            <div className="flex items-center gap-2">
-              <span className="grid size-8 place-items-center rounded-lg bg-brand text-sm font-semibold text-primary-foreground">
-                <Bot className="size-4" />
-              </span>
-              <span className="font-display font-semibold hidden sm:block">
-                {t("assistant.badge", "Citizen AI Workforce")}
-              </span>
-            </div>
-            <div className="ml-auto flex items-center gap-3">
-              {isReconnecting && (
-                <span className="text-xs text-amber flex items-center gap-1">
-                  <Loader2 className="size-3 animate-spin" /> Reconnecting...
-                </span>
-              )}
-              <LanguageSwitcher />
-            </div>
+    <AppShell>
+      <div className="space-y-6">
+        {/* Top Breadcrumb & Navigation */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link
+            to="/dashboard"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-ice hover:text-foreground transition-colors shadow-sm"
+          >
+            <ArrowLeft className="size-3.5" /> Back to Dashboard
+          </Link>
+          <div className="flex items-center gap-2 text-[11px] text-brand-soft">
+            <span className="size-1.5 animate-pulse-dot rounded-full bg-sage" />
+            Citizen AI Workforce · 6 Agents Online
           </div>
         </div>
-      </header>
 
-      <main className="flex-1 mx-auto w-full max-w-5xl px-5 py-8 flex flex-col">
+        <div className="flex flex-col">
         {!hasStarted ? (
           <div className="flex-1 flex flex-col items-center justify-center max-w-2xl mx-auto w-full text-center py-20">
             <h1 className="text-4xl font-display font-semibold mb-4">
@@ -291,7 +282,7 @@ export function AssistantPage() {
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
                   Your Query
                 </p>
-                <p className="text-base font-medium">{input}</p>
+                <p className="text-base font-medium">{activeQuery || input}</p>
               </div>
 
               {/* Error State with Retry Button */}
@@ -499,7 +490,7 @@ export function AssistantPage() {
             </div>
           </div>
         )}
-      </main>
+      </div>
 
       {/* Scheme Eligibility Breakdown Dialog */}
       <Dialog open={!!selectedScheme} onOpenChange={() => setSelectedScheme(null)}>
@@ -587,6 +578,22 @@ export function AssistantPage() {
           )}
         </DialogContent>
       </Dialog>
-    </div>
+
+      {/* Ecosystem Connection Footer */}
+      <div className="rounded-xl border border-line bg-card p-4 text-xs text-muted-foreground flex flex-wrap items-center justify-between gap-2 mt-8">
+        <span className="font-medium text-foreground">
+          {t(
+            "dashboard.connectedEcosystem",
+            "Your connected ecosystem: Sahayak works alongside myScheme, UMANG and DigiLocker — it never replaces them.",
+          )}
+        </span>
+        <Button asChild variant="link" size="sm" className="px-1 text-xs text-brand">
+          <Link to="/profile">
+            Manage connections <ChevronRight className="size-3 ml-0.5" />
+          </Link>
+        </Button>
+      </div>
+      </div>
+    </AppShell>
   );
 }
