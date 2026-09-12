@@ -4,7 +4,7 @@ document_extractor.py — Real Vision AI extraction using Google Gemini Flash.
 Flow:
   1. Fetch document metadata + file from Supabase Storage
   2. Determine file type (image vs PDF)
-  3. Send to Gemini Flash (gemini-2.0-flash) multimodal vision
+  3. Send to Gemini Flash (gemini-3.6-flash) multimodal vision
   4. Parse structured JSON response
   5. Validate extracted document_type vs citizen-selected type → flag mismatch
   6. Persist real results to Supabase documents table
@@ -234,32 +234,51 @@ def extract_document_data(document_id: str) -> Dict[str, Any]:
     extracted_payload: Optional[Dict[str, Any]] = None
     extraction_error: Optional[str] = None
 
+    candidate_models = [GEMINI_MODEL, "gemini-3.6-flash", "gemini-2.5-flash", "gemini-1.5-flash"]
+    models_to_try = []
+    for m in candidate_models:
+        if m and m not in models_to_try:
+            models_to_try.append(m)
+
     try:
         client = genai.Client(api_key=GOOGLE_API_KEY)
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=content_parts,
-            config=gtypes.GenerateContentConfig(
-                temperature=0.05,
-                response_mime_type="application/json",
-            ),
-        )
-        raw_text = (response.text or "").strip()
-        # Strip potential markdown code fences just in case
-        if raw_text.startswith("```"):
-            parts = raw_text.split("```")
-            raw_text = parts[1] if len(parts) > 1 else raw_text
-            if raw_text.startswith("json"):
-                raw_text = raw_text[4:]
-            raw_text = raw_text.strip()
+        last_ex = None
+        for model_candidate in models_to_try:
+            try:
+                logger.info(f"[{document_id}] Calling Gemini with model={model_candidate}")
+                response = client.models.generate_content(
+                    model=model_candidate,
+                    contents=content_parts,
+                    config=gtypes.GenerateContentConfig(
+                        temperature=0.05,
+                        response_mime_type="application/json",
+                    ),
+                )
+                raw_text = (response.text or "").strip()
+                # Strip potential markdown code fences just in case
+                if raw_text.startswith("```"):
+                    parts = raw_text.split("```")
+                    raw_text = parts[1] if len(parts) > 1 else raw_text
+                    if raw_text.startswith("json"):
+                        raw_text = raw_text[4:]
+                    raw_text = raw_text.strip()
 
-        extracted_payload = json.loads(raw_text)
-        logger.info(
-            f"[{document_id}] Gemini extracted: "
-            f"type={extracted_payload.get('document_type')}, "
-            f"name={extracted_payload.get('applicant_name')}, "
-            f"confidence={extracted_payload.get('confidence')}"
-        )
+                extracted_payload = json.loads(raw_text)
+                logger.info(
+                    f"[{document_id}] Gemini ({model_candidate}) extracted: "
+                    f"type={extracted_payload.get('document_type')}, "
+                    f"name={extracted_payload.get('applicant_name')}, "
+                    f"confidence={extracted_payload.get('confidence')}"
+                )
+                last_ex = None
+                break
+            except Exception as ex:
+                last_ex = ex
+                logger.warning(f"[{document_id}] Model {model_candidate} failed: {ex}")
+                continue
+
+        if not extracted_payload and last_ex:
+            raise last_ex
     except json.JSONDecodeError as e:
         extraction_error = f"AI returned unparseable response: {e}"
         logger.error(f"[{document_id}] JSON parse error: {e}")

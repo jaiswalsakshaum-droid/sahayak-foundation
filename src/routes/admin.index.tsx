@@ -354,7 +354,11 @@ function AdminDashboard() {
                       <div key={k} className="p-2 rounded bg-card border border-line">
                         <span className="text-muted-foreground block text-[10px]">{k}</span>
                         <span className="font-medium text-foreground">
-                          {typeof v === "object" ? v.value : String(v)}
+                          {typeof v === "object" && v !== null
+                            ? v.value !== undefined && v.value !== null && v.value !== ""
+                              ? String(v.value)
+                              : "—"
+                            : String(v ?? "—")}
                         </span>
                       </div>
                     ))}

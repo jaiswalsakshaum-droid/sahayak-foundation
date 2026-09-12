@@ -72,6 +72,7 @@ class SahayakState(TypedDict):
     selected_scheme_id: Optional[str]
     eligibility_result: Optional[Dict[str, Any]]
     missing_documents: Optional[List[str]]
+    pending_requirements: Optional[List[Dict[str, Any]]]
     application_draft: Optional[Dict[str, Any]]
     next_action: Optional[Dict[str, Any]]
     retry_count: int

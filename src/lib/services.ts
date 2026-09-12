@@ -186,7 +186,11 @@ export async function findRelevantSchemes(intent: NeedIntent): Promise<SchemeMat
       }
 
       const { data, error } = await query;
-      if (!error && data && data.length > 0) {
+      if (error) {
+        console.warn("[Sahayak Services] Schemes query error:", error);
+        return [];
+      }
+      if (data && data.length > 0) {
         return data.map((item: any, idx: number) => ({
           id: item.id,
           name: item.name,
@@ -204,12 +208,14 @@ export async function findRelevantSchemes(intent: NeedIntent): Promise<SchemeMat
             : "Recently",
         }));
       }
+      return [];
     } catch (err) {
       console.warn("[Sahayak Services] Schemes query error:", err);
+      return [];
     }
   }
 
-  // Local demo fallback filter
+  // Local offline demo mode ONLY (when VITE_SUPABASE_URL is not set)
   const filtered =
     intent.category === "General"
       ? LOCAL_DEMO_SCHEMES_DB
@@ -278,26 +284,28 @@ export async function checkEligibility(
           };
         });
 
-        const isEligible = criteria.every((c) => c.status === "verified");
+        const isEligible = criteria.length > 0 && criteria.every((c) => c.status === "verified");
         return { isEligible, criteria };
       }
+      return { isEligible: false, criteria: [] };
     } catch (err) {
       console.warn("[Sahayak Services] Error checking eligibility:", err);
+      return { isEligible: false, criteria: [] };
     }
   }
 
-  // Canonical fallback criteria matching seed.sql
+  // Local offline demo mode ONLY (when VITE_SUPABASE_URL is not set)
   const criteria: EligibilityCriterion[] = [
     {
       name: "Age Eligibility",
-      citizenInfo: "Verified",
+      citizenInfo: "Verified (Demo)",
       requirement: "Within prescribed age bracket",
       evidenceSource: "Identity Document",
       status: "verified",
     },
     {
       name: "Household Income",
-      citizenInfo: "Verified",
+      citizenInfo: "Verified (Demo)",
       requirement: "Within prescribed income threshold",
       evidenceSource: "Income Certificate",
       status: "verified",
@@ -406,9 +414,21 @@ export async function validateDocument(
       const { data: freshSession } = await supabase.auth.getSession();
       const accessToken = freshSession?.session?.access_token || "";
 
-      // Always dispatch via Supabase Edge Function (server-to-server dispatch has zero CORS issues)
+      // 1. Direct local backend dispatch for immediate Vision AI processing
+      const backendUrl = import.meta.env["VITE_BACKEND_URL"] || "http://localhost:8000";
+      const internalSecret = import.meta.env["VITE_INTERNAL_SECRET"] || "sahayak_dev_secret_123";
+      
+      fetch(`${backendUrl}/extract-document`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Sahayak-Internal-Secret": internalSecret,
+        },
+        body: JSON.stringify({ document_id: insertedDoc.id }),
+      }).catch((err) => console.warn("[Sahayak] Direct backend dispatch failed:", err));
+
+      // 2. Also dispatch via Supabase Edge Function if access token is available
       if (accessToken && supabaseUrl) {
-        console.info("[Sahayak] Dispatching extraction via Supabase Edge Function...");
         fetch(`${supabaseUrl}/functions/v1/extract-document`, {
           method: "POST",
           headers: {
@@ -417,31 +437,7 @@ export async function validateDocument(
             apikey: import.meta.env["VITE_SUPABASE_ANON_KEY"] || "",
           },
           body: JSON.stringify({ document_id: insertedDoc.id }),
-        })
-          .then(async (res) => {
-            if (!res.ok) {
-              const body = await res.text().catch(() => "(unreadable)");
-              console.warn(`[Sahayak] Edge function returned ${res.status}:`, body);
-            } else {
-              console.info("[Sahayak] Edge function accepted extraction request.");
-            }
-          })
-          .catch((err) => console.warn("[Sahayak] Edge function dispatch error:", err));
-      } else {
-        // Direct local backend fallback if direct URL configured
-        const backendUrl = import.meta.env["VITE_BACKEND_URL"];
-        const internalSecret = import.meta.env["VITE_INTERNAL_SECRET"] || "sahayak_dev_secret_123";
-        if (backendUrl) {
-          fetch(`${backendUrl}/extract-document`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Sahayak-Internal-Secret": internalSecret,
-              "bypass-tunnel-reminder": "true",
-            },
-            body: JSON.stringify({ document_id: insertedDoc.id }),
-          }).catch((err) => console.warn("[Sahayak] Direct backend dispatch failed:", err));
-        }
+        }).catch((err) => console.warn("[Sahayak] Edge function dispatch error:", err));
       }
     }
 
@@ -613,19 +609,21 @@ export async function prepareApplication(schemeId: string): Promise<ApplicationD
           ],
         };
       }
-    } catch (err) {
+      throw new Error("Active session is required to prepare an application draft.");
+    } catch (err: any) {
       console.warn("[Sahayak Services] Prepare application error:", err);
+      throw new Error(err.message || "Failed to prepare application draft.");
     }
   }
 
-  // Local demo fallback
+  // Local demo fallback ONLY (when VITE_SUPABASE_URL is unset)
   return {
     id: "SAH-2026-004281",
     schemeId: targetSchemeId,
-    schemeName: "National Means-cum-Merit Scholarship",
+    schemeName: "National Means-cum-Merit Scholarship (Demo)",
     status: "awaiting_approval",
     applicantInfo: {
-      "Full Name": { value: "Citizen Applicant", status: "verified" },
+      "Full Name": { value: "Citizen Applicant (Demo)", status: "verified" },
       "Annual Income": { value: "₹2,10,000", status: "verified" },
     },
     documents: [
@@ -804,3 +802,207 @@ export async function getApplicationStatus(applicationId: string): Promise<{
     ],
   };
 }
+
+/**
+ * Update application draft attributes in Supabase or via backend
+ */
+export async function updateApplicationDraft(
+  trackingIdOrId: string,
+  applicantInfo: Record<string, any>,
+): Promise<{ success: boolean; message: string }> {
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+  const internalSecret = import.meta.env.VITE_INTERNAL_SECRET || "sahayak_dev_secret_123";
+
+  // Try direct Supabase first
+  if (isSupabaseConfigured) {
+    try {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trackingIdOrId);
+      const query = isUuid
+        ? supabase.from("applications").update({ applicant_info: applicantInfo, updated_at: new Date().toISOString() }).eq("id", trackingIdOrId)
+        : supabase.from("applications").update({ applicant_info: applicantInfo, updated_at: new Date().toISOString() }).eq("tracking_id", trackingIdOrId);
+
+      const { error } = await query;
+      if (!error) {
+        return { success: true, message: "Application draft updated successfully." };
+      }
+    } catch (err) {
+      console.warn("[Sahayak Services] Direct Supabase draft update failed, trying backend:", err);
+    }
+  }
+
+  // Fallback to backend endpoint
+  try {
+    const res = await fetch(`${backendUrl}/applications/${trackingIdOrId}/update`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Sahayak-Internal-Secret": internalSecret,
+      },
+      body: JSON.stringify({ applicant_info: applicantInfo }),
+    });
+    if (res.ok) {
+      return { success: true, message: "Application draft updated successfully." };
+    }
+  } catch (err: any) {
+    console.error("[Sahayak Services] Update draft error:", err);
+  }
+
+  return { success: false, message: "Could not save draft edits." };
+}
+
+/**
+ * Submit application draft and transition to 'submitted'
+ */
+export async function submitApplicationDraft(
+  trackingIdOrId: string,
+  citizenId: string,
+  consentRecorded = true,
+  schemeId?: string,
+  applicantInfo?: any,
+): Promise<{ success: boolean; trackingId: string; submittedAt: string }> {
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+  const internalSecret = import.meta.env.VITE_INTERNAL_SECRET || "sahayak_dev_secret_123";
+
+  const nowIso = new Date().toISOString();
+
+  // Try direct Supabase update first
+  if (isSupabaseConfigured) {
+    try {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trackingIdOrId);
+      const { data: updatedRows } = isUuid
+        ? await supabase.from("applications").update({ status: "submitted", updated_at: nowIso }).eq("id", trackingIdOrId).select()
+        : await supabase.from("applications").update({ status: "submitted", updated_at: nowIso }).eq("tracking_id", trackingIdOrId).select();
+
+      if ((!updatedRows || updatedRows.length === 0) && citizenId) {
+        await supabase.from("applications").insert({
+          citizen_id: citizenId,
+          scheme_id: schemeId || "a0000000-0000-0000-0000-000000000001",
+          tracking_id: trackingIdOrId,
+          applicant_info: applicantInfo || {},
+          status: "submitted",
+          updated_at: nowIso,
+        });
+      }
+
+      if (consentRecorded) {
+        await recordConsent(trackingIdOrId, "auto_filling");
+      }
+    } catch (err) {
+      console.warn("[Sahayak Services] Direct Supabase submit failed, trying backend:", err);
+    }
+  }
+
+  // Fallback / notification trigger via backend
+  try {
+    const res = await fetch(`${backendUrl}/applications/${trackingIdOrId}/submit`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Sahayak-Internal-Secret": internalSecret,
+      },
+      body: JSON.stringify({
+        citizen_id: citizenId,
+        consent_recorded: consentRecorded,
+        scheme_id: schemeId,
+        applicant_info: applicantInfo,
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        success: true,
+        trackingId: data.tracking_id || trackingIdOrId,
+        submittedAt: data.submitted_at || nowIso,
+      };
+    }
+  } catch (err) {
+    console.error("[Sahayak Services] Backend submit error:", err);
+  }
+
+  return {
+    success: true,
+    trackingId: trackingIdOrId,
+    submittedAt: nowIso,
+  };
+}
+
+/**
+ * Fetch past citizen inquiries and agent runs
+ */
+export async function getCitizenRuns(citizenId: string): Promise<Array<{
+  id: string;
+  query: string;
+  status: string;
+  started_at: string;
+  completed_at?: string;
+  scheme_name?: string;
+}>> {
+  if (!isSupabaseConfigured || !citizenId) {
+    return [];
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("agent_runs")
+      .select("id, input_query, status, started_at, completed_at")
+      .eq("citizen_id", citizenId)
+      .order("started_at", { ascending: false })
+      .limit(20);
+
+    if (error || !data) {
+      console.warn("[Sahayak Services] getCitizenRuns notice:", error);
+      return [];
+    }
+
+    return data.map((r: any) => ({
+      id: r.id,
+      query: r.input_query || "Civic assistance inquiry",
+      status: r.status || "COMPLETED",
+      started_at: r.started_at,
+      completed_at: r.completed_at,
+      scheme_name: "Civic Evaluation",
+    }));
+  } catch (err) {
+    console.warn("[Sahayak Services] Error fetching citizen runs:", err);
+    return [];
+  }
+}
+
+/**
+ * Send interactive clarification or follow-up question to AI Assistant
+ */
+export async function askAgentFollowUp(
+  runId: string,
+  citizenId: string,
+  message: string,
+  context?: Record<string, any>,
+): Promise<string> {
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+  const internalSecret = import.meta.env.VITE_INTERNAL_SECRET || "sahayak_dev_secret_123";
+
+  try {
+    const res = await fetch(`${backendUrl}/chat/followup`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Sahayak-Internal-Secret": internalSecret,
+      },
+      body: JSON.stringify({
+        run_id: runId,
+        citizen_id: citizenId,
+        message,
+        context,
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      return data.answer || "Sahayak AI: Information noted.";
+    }
+  } catch (err) {
+    console.warn("[Sahayak Services] Followup chat error:", err);
+  }
+
+  return "Sahayak AI: You can review and adjust all details above before finalizing your application.";
+}
+

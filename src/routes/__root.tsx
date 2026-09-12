@@ -135,12 +135,22 @@ function RootShell({ children }: { children: ReactNode }) {
 }
 
 import { Toaster } from "@/components/ui/sonner";
+import { isSupabaseConfigured } from "@/lib/supabase";
+import { AlertTriangle } from "lucide-react";
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
   return (
     <QueryClientProvider client={queryClient}>
+      {!isSupabaseConfigured && (
+        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-1.5 text-center text-xs font-medium text-amber-700 dark:text-amber-300 flex items-center justify-center gap-2">
+          <AlertTriangle className="size-3.5 text-amber-600 dark:text-amber-400" />
+          <span>
+            <strong>DEMO MODE:</strong> Running with offline demo catalog. Live agent execution and database sync are inactive.
+          </span>
+        </div>
+      )}
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <Outlet />
       <Toaster position="bottom-right" />

@@ -115,13 +115,19 @@ def call_groq_json_with_retry(
     system_prompt: str,
     user_prompt: str,
     pydantic_model: Optional[Any] = None,
-    max_retries: int = 2,
+    max_retries: int = 1,
+    max_tokens: int = 300,
+    run_id: Optional[str] = None,
+    agent_name: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Invokes Groq API with JSON mode and structured Pydantic validation.
-    Handles typed 429 rate limit exceptions and respects retry-after headers.
+    Enforces strict max_tokens per prompt to prevent token overconsumption.
+    Handles typed 429 rate limit exceptions and surfaces API status transparently.
     """
     if not groq_client:
+        if run_id and agent_name:
+            write_agent_event(run_id, agent_name, "Groq client not initialized. Using deterministic civic logic.", {"api_notice": "no_groq_client"})
         return None
 
     attempt = 0
@@ -134,7 +140,8 @@ def call_groq_json_with_retry(
                     {"role": "user", "content": user_prompt},
                 ],
                 response_format={"type": "json_object"},
-                temperature=0.2,
+                temperature=0.1,
+                max_tokens=max_tokens,
             )
             raw_text = response.choices[0].message.content
             parsed_json = json.loads(raw_text)
@@ -159,8 +166,12 @@ def call_groq_json_with_retry(
                 except Exception:
                     pass
             logger.warning(f"Groq Rate Limit (429). Retrying after {retry_after}s (attempt {attempt}/{max_retries})...")
+            if run_id and agent_name:
+                write_agent_event(run_id, agent_name, f"⚠️ Groq rate limit (429) hit. Retry scheduled in {retry_after}s...", {"api_status": "rate_limited", "retry_after": retry_after})
             if attempt > max_retries:
                 logger.error("Max retries exceeded on Groq rate limit.")
+                if run_id and agent_name:
+                    write_agent_event(run_id, agent_name, "⚠️ Rate limit retries exhausted. Gracefully engaging deterministic fallback.", {"api_status": "fallback_engaged"})
                 return None
             time.sleep(retry_after)
 
@@ -170,10 +181,14 @@ def call_groq_json_with_retry(
                 time.sleep(2 * attempt + 1)
             else:
                 logger.error(f"Groq API status error {ase.status_code}: {ase}")
+                if run_id and agent_name:
+                    write_agent_event(run_id, agent_name, f"⚠️ Groq API Error ({ase.status_code}): {str(ase)[:80]}. Using deterministic rules.", {"api_status": "error", "code": ase.status_code})
                 break
 
         except Exception as e:
             logger.error(f"Unexpected error calling Groq on model {model}: {e}")
+            if run_id and agent_name:
+                write_agent_event(run_id, agent_name, f"⚠️ LLM Notice: {str(e)[:80]}. Using deterministic rules.", {"api_status": "exception", "error": str(e)[:100]})
             break
 
     return None
@@ -221,8 +236,59 @@ def evaluate_numeric_rule(
     c_lower = criterion_name.lower()
     r_lower = req.lower()
 
-    # 1. Income Comparison
-    if "income" in c_lower or "income" in r_lower or "₹" in req or "rs" in r_lower:
+    # 1. Age Range Comparison (Prioritize if criterion name is age-related)
+    if "age" in c_lower or "dob" in c_lower or "birth" in c_lower or ("year" in c_lower and "income" not in c_lower):
+        # Check identity docs or profile
+        id_doc = next(
+            (d for d in verified_docs if any(k in d.get("document_type", "").lower() for k in ["aadhaar", "identity", "birth", "pan"])),
+            None
+        )
+        extracted = (id_doc.get("extracted_fields") or {}) if id_doc else {}
+        citizen_age = extracted.get("age") or profile.get("age")
+
+        if citizen_age is None:
+            return {
+                "criterion_name": criterion_name,
+                "citizen_info": "Not Verified",
+                "requirement": req,
+                "evidence_source": evidence_source or "Identity Document",
+                "status": "missing",
+                "explanation": "Citizen age could not be determined from profile or identity documents.",
+            }
+
+        try:
+            citizen_age = int(float(citizen_age))
+        except (ValueError, TypeError):
+            citizen_age = 20
+
+        age_range = parse_age_range(req)
+        citizen_val = f"{citizen_age} years"
+        source = f"{id_doc.get('document_type')} (Verified)" if id_doc else "Citizen Profile"
+
+        if age_range:
+            min_age, max_age = age_range
+            is_met = min_age <= citizen_age <= max_age
+            status = "verified" if is_met else "mismatch"
+            explanation = (
+                f"Citizen age ({citizen_age} years) is within eligible range ({min_age}–{max_age} years)."
+                if is_met
+                else f"Citizen age ({citizen_age} years) is outside required range ({req})."
+            )
+        else:
+            status = "verified"
+            explanation = f"Age criteria satisfied ({citizen_age} years)."
+
+        return {
+            "criterion_name": criterion_name,
+            "citizen_info": citizen_val,
+            "requirement": req,
+            "evidence_source": source,
+            "status": status,
+            "explanation": explanation,
+        }
+
+    # 2. Income Comparison
+    if "income" in c_lower or "salary" in c_lower or "earning" in c_lower or "income" in r_lower or "₹" in req or "rs" in r_lower:
         # Check verified Income Certificate first, then profile
         income_doc = next(
             (d for d in verified_docs if "income" in d.get("document_type", "").lower()),
@@ -256,57 +322,6 @@ def evaluate_numeric_rule(
             if is_met
             else f"Annual income {citizen_val} exceeds upper limit ({req})."
         )
-        return {
-            "criterion_name": criterion_name,
-            "citizen_info": citizen_val,
-            "requirement": req,
-            "evidence_source": source,
-            "status": status,
-            "explanation": explanation,
-        }
-
-    # 2. Age Range Comparison
-    if "age" in c_lower or "age" in r_lower or "years" in r_lower or "year" in r_lower:
-        # Check identity docs or profile
-        id_doc = next(
-            (d for d in verified_docs if any(k in d.get("document_type", "").lower() for k in ["aadhaar", "identity", "birth", "pan"])),
-            None
-        )
-        extracted = (id_doc.get("extracted_fields") or {}) if id_doc else {}
-        citizen_age = extracted.get("age") or profile.get("age")
-
-        if citizen_age is None:
-            return {
-                "criterion_name": criterion_name,
-                "citizen_info": "Not Verified",
-                "requirement": req,
-                "evidence_source": evidence_source or "Identity Document",
-                "status": "missing",
-                "explanation": "Citizen age could not be determined from profile or identity documents.",
-            }
-
-        try:
-            citizen_age = int(float(citizen_age))
-        except (ValueError, TypeError):
-            citizen_age = 20
-
-        age_range = parse_age_range(req)
-        citizen_val = f"{citizen_age} years"
-        source = f"{id_doc.get('document_type')} (Verified)" if id_doc else "Citizen Profile"
-
-        if age_range:
-            min_age, max_age = age_range
-            is_met = min_age <= citizen_age <= max_age
-            status = "verified" if is_met else "mismatch"
-            explanation = (
-                f"Citizen age ({citizen_age} years) is within eligible range ({min_age}-{max_age} years)."
-                if is_met
-                else f"Citizen age ({citizen_age} years) is outside eligible range ({req})."
-            )
-        else:
-            status = "verified"
-            explanation = f"Age criteria satisfied ({citizen_age} years)."
-
         return {
             "criterion_name": criterion_name,
             "citizen_info": citizen_val,
@@ -668,14 +683,39 @@ def evaluate_criterion_hybrid(
 # ==============================================================================
 # Agent Nodes
 # ==============================================================================
+_INTENT_CACHE: Dict[str, Dict[str, Any]] = {}
 
 def citizen_agent_node(state: SahayakState) -> Dict[str, Any]:
-    """Citizen Agent: Understands intent, needs, and urgency from citizen context."""
+    """Citizen Agent: Understands intent, needs, and urgency from citizen context with in-memory caching."""
     run_id = state.get("run_id")
     query = state.get("query", "")
     profile = state.get("citizen_profile", {})
 
-    write_agent_event(run_id, "Citizen Agent", "Analyzing citizen situation & extracting core need intent...")
+    write_agent_event(
+        run_id,
+        "Citizen Agent",
+        "Analyzing citizen situation & extracting core need intent...",
+        {"thought": f"Parsing natural language query: '{query}' and comparing with profile demographics."}
+    )
+
+    normalized_query = query.strip().lower()
+    if normalized_query in _INTENT_CACHE:
+        cached_intent = _INTENT_CACHE[normalized_query]
+        logger.info(f"Using cached intent classification for query='{query[:40]}...'")
+        write_agent_event(
+            run_id,
+            "Citizen Agent",
+            f"Intent resolved from cache: {cached_intent.get('category')} ({cached_intent.get('urgency')} urgency).",
+            {"intent": cached_intent, "thought": "Query matched in-memory cache; skipped LLM call to save tokens."}
+        )
+        return {"intent": cached_intent}
+
+    write_agent_event(
+        run_id,
+        "Citizen Agent",
+        f"Classifying need using model '{MODEL_FAST}' (max_tokens: 150)...",
+        {"thought": "Evaluating domain keywords (Education, Agriculture, Housing, Employment, Welfare)."}
+    )
 
     system_prompt = (
         "You are Sahayak's Citizen Agent. Analyze the citizen's query and profile to classify their need. "
@@ -683,23 +723,35 @@ def citizen_agent_node(state: SahayakState) -> Dict[str, Any]:
         "{ 'category': 'Education'|'Agriculture'|'Housing'|'Employment & Pension'|'Women & Child'|'General', "
         "'urgency': 'low'|'medium'|'high', 'keywords': ['list', 'of', 'terms'], 'summary': '1 sentence summary' }"
     )
-    user_prompt = f"Citizen Query: '{query}'\nCitizen Profile: {json.dumps(profile)}"
+    user_prompt = f"Query: {query[:200]}\nProfile: {json.dumps(profile)}"
 
-    llm_result = call_groq_json_with_retry(MODEL_FAST, system_prompt, user_prompt, pydantic_model=NeedIntent)
+    llm_result = call_groq_json_with_retry(
+        MODEL_FAST,
+        system_prompt,
+        user_prompt,
+        pydantic_model=NeedIntent,
+        max_retries=1,
+        max_tokens=150,
+        run_id=run_id,
+        agent_name="Citizen Agent",
+    )
     if not llm_result:
-        category = "Education" if "scholarship" in query.lower() or "study" in query.lower() else "General"
+        category = "Education" if "scholarship" in query.lower() or "study" in query.lower() or "school" in query.lower() else "General"
         llm_result = {
             "category": category,
-            "urgency": "high" if "urgent" in query.lower() else "medium",
-            "keywords": [w for w in query.split() if len(w) > 4],
+            "urgency": "high" if "urgent" in query.lower() or "help" in query.lower() else "medium",
+            "keywords": [w for w in query.split() if len(w) > 4][:5],
             "summary": f"Citizen requested assistance regarding {category.lower()} benefits.",
         }
+
+    # Cache intent classification
+    _INTENT_CACHE[normalized_query] = llm_result
 
     write_agent_event(
         run_id,
         "Citizen Agent",
         f"Intent identified: {llm_result.get('category')} ({llm_result.get('urgency')} urgency).",
-        {"intent": llm_result}
+        {"intent": llm_result, "thought": f"Classified primary category as '{llm_result.get('category')}' with summary: {llm_result.get('summary')}"}
     )
 
     return {"intent": llm_result}
@@ -710,7 +762,12 @@ def scheme_agent_node(state: SahayakState) -> Dict[str, Any]:
     intent = state.get("intent", {})
     category = intent.get("category", "General")
 
-    write_agent_event(run_id, "Scheme Agent", f"Searching active central & state schemes for category: {category}...")
+    write_agent_event(
+        run_id,
+        "Scheme Agent",
+        f"Searching active central & state schemes for category: {category}...",
+        {"thought": f"Querying schemes table where category = '{category}' and status = 'Active'."}
+    )
 
     schemes_data = []
     if supabase_admin:
@@ -722,6 +779,7 @@ def scheme_agent_node(state: SahayakState) -> Dict[str, Any]:
             schemes_data = res.data or []
         except Exception as e:
             logger.warning(f"Error querying schemes: {e}")
+            write_agent_event(run_id, "Scheme Agent", f"Database query notice: {str(e)[:80]}. Using verified backup catalog.", {"thought": "Engaging fallback catalog."})
 
     if not schemes_data:
         schemes_data = [
@@ -730,18 +788,40 @@ def scheme_agent_node(state: SahayakState) -> Dict[str, Any]:
                 "name": "National Means-cum-Merit Scholarship",
                 "category": "Education",
                 "benefit": "₹12,000 / year",
-                "description": "Financial support for secondary education students from economically weaker sections.",
+                "description": "Financial support for meritorious students continuing secondary education in government and aided schools.",
             }
         ]
 
+    write_agent_event(
+        run_id,
+        "Scheme Agent",
+        f"Found {len(schemes_data)} scheme candidate(s). Ranking with model '{MODEL_REASONING}' (max_tokens: 300)...",
+        {"thought": f"Scoring match relevance against {len(schemes_data)} candidate programs."}
+    )
+
+    # Minimize prompt footprint
+    compact_schemes = [
+        {"id": s.get("id"), "name": s.get("name"), "benefit": s.get("benefit")}
+        for s in schemes_data[:6]
+    ]
+
     system_prompt = (
-        "You are Sahayak's Scheme Agent. Compare the citizen's need with available schemes and select the top match. "
-        "Return valid JSON matching this schema: "
+        "You are Sahayak's Scheme Agent. Select the top matching scheme. "
+        "Return valid JSON matching: "
         "{ 'selected_scheme_id': 'string', 'candidate_schemes': [{ 'id': 'string', 'name': 'string', 'category': 'string', 'benefit': 'string', 'match_score': 95, 'reasoning': 'string' }], 'message': 'string' }"
     )
-    user_prompt = f"Need Intent: {json.dumps(intent)}\nAvailable Schemes Catalog: {json.dumps(schemes_data)}"
+    user_prompt = f"Intent: {json.dumps(intent)}\nSchemes: {json.dumps(compact_schemes)}"
 
-    llm_result = call_groq_json_with_retry(MODEL_REASONING, system_prompt, user_prompt, pydantic_model=SchemeRankingResult)
+    llm_result = call_groq_json_with_retry(
+        MODEL_REASONING,
+        system_prompt,
+        user_prompt,
+        pydantic_model=SchemeRankingResult,
+        max_retries=1,
+        max_tokens=300,
+        run_id=run_id,
+        agent_name="Scheme Agent",
+    )
     if not llm_result or not llm_result.get("candidate_schemes"):
         top_scheme = schemes_data[0]
         llm_result = {
@@ -762,11 +842,19 @@ def scheme_agent_node(state: SahayakState) -> Dict[str, Any]:
     selected_id = llm_result.get("selected_scheme_id") or schemes_data[0].get("id")
     candidate_list = llm_result.get("candidate_schemes", [])
 
+    if supabase_admin and run_id and selected_id:
+        try:
+            supabase_admin.table("agent_runs").update({
+                "selected_scheme_id": selected_id
+            }).eq("id", run_id).execute()
+        except Exception as e:
+            logger.warning(f"Could not update selected_scheme_id on agent_runs: {e}")
+
     write_agent_event(
         run_id,
         "Scheme Agent",
-        f"Found {len(candidate_list)} matching scheme(s). Selected top recommendation: '{candidate_list[0].get('name', 'Recommended Scheme')}'.",
-        {"candidate_schemes": candidate_list, "selected_scheme_id": selected_id}
+        f"Selected top recommendation: '{candidate_list[0].get('name', 'Recommended Scheme')}' ({candidate_list[0].get('match_score', 90)}% Match).",
+        {"candidate_schemes": candidate_list, "selected_scheme_id": selected_id, "thought": f"Selected scheme ID {selected_id} for eligibility evaluation."}
     )
 
     return {
@@ -774,8 +862,46 @@ def scheme_agent_node(state: SahayakState) -> Dict[str, Any]:
         "selected_scheme_id": selected_id,
     }
 
+def evaluate_text_rules_batched(
+    unresolved_rules: List[Dict[str, Any]],
+    profile: Dict[str, Any],
+    verified_docs: List[Dict[str, Any]],
+    run_id: Optional[str] = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Batches all qualitative text criteria evaluations into a single LLM call for token efficiency."""
+    if not unresolved_rules or not groq_client:
+        return {}
+
+    system_prompt = (
+        "You are Sahayak's Evidence-Backed Civic Eligibility Judge. "
+        "Evaluate whether the citizen satisfies each criterion based STRICTLY on available profile and document evidence.\n"
+        "Return valid JSON matching: { 'evaluations': [{ 'criterion_name': '...', 'citizen_info': 'concise evidence summary', 'requirement': '...', 'evidence_source': '...', 'status': 'verified'|'missing'|'mismatch', 'explanation': '1 sentence justification' }] }"
+    )
+    user_prompt = (
+        f"Criteria: {json.dumps([{'criterion_name': r.get('criterion_name'), 'requirement': r.get('requirement')} for r in unresolved_rules])}\n"
+        f"Citizen Profile: {json.dumps(profile)}\n"
+        f"Verified Docs: {[d.get('document_type') for d in verified_docs]}"
+    )
+
+    result = call_groq_json_with_retry(
+        MODEL_REASONING,
+        system_prompt,
+        user_prompt,
+        max_retries=1,
+        max_tokens=400,
+        run_id=run_id,
+        agent_name="Eligibility Agent",
+    )
+    eval_map = {}
+    if result and "evaluations" in result and isinstance(result["evaluations"], list):
+        for item in result["evaluations"]:
+            name = item.get("criterion_name")
+            if name:
+                eval_map[name] = item
+    return eval_map
+
 def eligibility_agent_node(state: SahayakState) -> Dict[str, Any]:
-    """Eligibility Agent: Hybrid deterministic & reasoning rule evaluator with verifiable audit logs."""
+    """Eligibility Agent: Hybrid deterministic & batched reasoning rule evaluator with verifiable audit logs."""
     run_id = state.get("run_id")
     scheme_id = state.get("selected_scheme_id")
     citizen_id = state.get("citizen_id")
@@ -809,15 +935,79 @@ def eligibility_agent_node(state: SahayakState) -> Dict[str, Any]:
 
     evaluated_criteria = []
     has_missing_or_mismatch = False
+    unresolved_text_rules = []
 
+    # 1. First pass: Evaluate deterministic rules (numeric, boolean, enum, and pattern-matched text)
     for rule in rules_data:
-        eval_item = evaluate_criterion_hybrid(rule, profile, verified_docs)
-        evaluated_criteria.append(eval_item)
+        rule_type = (rule.get("rule_type") or "text").lower()
+        c_name = rule.get("criterion_name", "")
+        req = rule.get("requirement", "")
+        src = rule.get("evidence_source", "")
 
+        if rule_type == "numeric":
+            eval_item = evaluate_numeric_rule(c_name, req, src, profile, verified_docs)
+            evaluated_criteria.append(eval_item)
+        elif rule_type == "boolean":
+            eval_item = evaluate_boolean_rule(c_name, req, src, profile, verified_docs)
+            evaluated_criteria.append(eval_item)
+        elif rule_type == "enum":
+            eval_item = evaluate_enum_rule(c_name, req, src, profile, verified_docs)
+            evaluated_criteria.append(eval_item)
+        else:
+            # Check fast deterministic text patterns (bank account, citizenship, school enrollment)
+            c_lower = c_name.lower()
+            r_lower = req.lower()
+            if any(k in c_lower or k in r_lower for k in ["bank", "passbook", "citizen", "citizenship", "resident"]):
+                eval_item = evaluate_text_rule(c_name, req, src, profile, verified_docs)
+                evaluated_criteria.append(eval_item)
+            elif any(k in c_lower or k in r_lower for k in ["school", "enrollment", "student", "college"]):
+                enroll_doc = next((d for d in verified_docs if any(k in d.get("document_type", "").lower() for k in ["enrollment", "student", "admission", "school", "college"])), None)
+                if enroll_doc:
+                    eval_item = {
+                        "criterion_name": c_name,
+                        "citizen_info": "Verified Enrolled Student",
+                        "requirement": req,
+                        "evidence_source": f"{enroll_doc.get('document_type')} (Verified)",
+                        "status": "verified",
+                        "explanation": f"Student status verified via {enroll_doc.get('document_type')}.",
+                    }
+                else:
+                    eval_item = {
+                        "criterion_name": c_name,
+                        "citizen_info": "Evidence Required",
+                        "requirement": req,
+                        "evidence_source": src or "Enrollment Certificate",
+                        "status": "missing",
+                        "explanation": f"Mandatory evidence ({src or 'Enrollment Certificate'}) required to verify student enrollment.",
+                    }
+                evaluated_criteria.append(eval_item)
+            else:
+                unresolved_text_rules.append(rule)
+
+    # 2. Second pass: Batch all remaining unresolved qualitative text rules into ONE LLM call
+    if unresolved_text_rules:
+        batch_eval_map = evaluate_text_rules_batched(unresolved_text_rules, profile, verified_docs)
+        for rule in unresolved_text_rules:
+            c_name = rule.get("criterion_name", "Eligibility Rule")
+            req = rule.get("requirement", "")
+            src = rule.get("evidence_source", "Profile / Document")
+            if c_name in batch_eval_map:
+                evaluated_criteria.append(batch_eval_map[c_name])
+            else:
+                evaluated_criteria.append({
+                    "criterion_name": c_name,
+                    "citizen_info": "Insufficient Data",
+                    "requirement": req,
+                    "evidence_source": src,
+                    "status": "missing",
+                    "explanation": f"Mandatory evidence ({src}) required for verification.",
+                })
+
+    # Write immutable audit logs
+    for eval_item in evaluated_criteria:
         if eval_item["status"] != "verified":
             has_missing_or_mismatch = True
 
-        # Write immutable audit log for civic transparency
         write_audit_log(
             run_id=run_id,
             agent_name="Eligibility Agent",
@@ -890,14 +1080,35 @@ def document_agent_node(state: SahayakState) -> Dict[str, Any]:
         elif req.get("is_mandatory", True):
             missing_docs.append(req_type)
 
+    pending_requirements = []
     if missing_docs:
-        action_msg = f"{len(missing_docs)} mandatory document(s) missing ({', '.join(missing_docs)}). Upload required."
+        action_msg = f"{len(missing_docs)} mandatory document(s) missing ({', '.join(missing_docs)}). Upload required to continue."
         next_action = {
             "type": "upload_document",
             "document_name": missing_docs[0],
             "description": f"Please upload your {missing_docs[0]} to verify eligibility and assemble your application.",
             "agent": "Document Agent",
         }
+        pending_requirements = [
+            {"document_type": doc, "reason": "Mandatory document requirement for scheme"}
+            for doc in missing_docs
+        ]
+        # Persist pending requirements and pause run status in DB
+        if supabase_admin and run_id:
+            try:
+                supabase_admin.table("agent_runs").update({
+                    "status": "ACTION REQUIRED",
+                    "pending_requirements": pending_requirements,
+                    "selected_scheme_id": scheme_id,
+                }).eq("id", run_id).execute()
+            except Exception as e:
+                logger.warning(f"Error persisting pending_requirements on agent_runs: {e}. Falling back to updating status only.")
+                try:
+                    supabase_admin.table("agent_runs").update({
+                        "status": "ACTION REQUIRED",
+                    }).eq("id", run_id).execute()
+                except Exception as e2:
+                    logger.error(f"Error updating agent_runs status to ACTION REQUIRED: {e2}")
     else:
         action_msg = "All required documents verified on file."
         next_action = None
@@ -909,12 +1120,14 @@ def document_agent_node(state: SahayakState) -> Dict[str, Any]:
         {
             "missing_documents": missing_docs,
             "verified_documents": verified_doc_names,
+            "pending_requirements": pending_requirements,
             "next_action": next_action,
         }
     )
 
     return {
         "missing_documents": missing_docs,
+        "pending_requirements": pending_requirements,
         "next_action": next_action,
         "retry_count": retry_count + 1,
     }
@@ -928,26 +1141,112 @@ def application_agent_node(state: SahayakState) -> Dict[str, Any]:
 
     write_agent_event(run_id, "Application Agent", "Assembling verified application draft from verified records...")
 
+    # Extract real citizen attributes from profile and verified documents
+    full_name = profile.get("full_name") or "Citizen Applicant"
+    
+    # Check verified identity and bank documents
+    verified_docs = []
+    if supabase_admin and citizen_id:
+        try:
+            doc_res = supabase_admin.table("documents").select("*").eq("citizen_id", citizen_id).eq("status", "verified").execute()
+            verified_docs = doc_res.data or []
+        except Exception as e:
+            logger.error(f"Error fetching verified documents for application assembly: {e}")
+
+    id_doc = next((d for d in verified_docs if any(k in d.get("document_type", "").lower() for k in ["aadhaar", "identity", "pan", "birth"])), None)
+    id_fields = (id_doc.get("extracted_fields") or {}) if id_doc else {}
+    
+    bank_doc = next((d for d in verified_docs if any(k in d.get("document_type", "").lower() for k in ["bank", "passbook"])), None)
+    bank_fields = (bank_doc.get("extracted_fields") or {}) if bank_doc else {}
+
+    dob_val = id_fields.get("dob") or id_fields.get("DOB") or profile.get("dob")
+    if not dob_val and profile.get("age"):
+        dob_val = f"Age: {profile.get('age')} years"
+    dob_status = "verified" if (id_fields.get("dob") or id_fields.get("DOB")) else ("verified" if profile.get("age") else "needs_review")
+
+    income_val = profile.get("annual_income")
+    income_str = f"₹{int(income_val):,}" if income_val is not None else "Pending declaration"
+    income_status = "verified" if any("income" in d.get("document_type", "").lower() for d in verified_docs) else ("verified" if income_val is not None else "needs_review")
+
+    bank_val = bank_fields.get("account_number") or bank_fields.get("Account Number") or profile.get("bank_account_number")
+    bank_status = "verified" if bank_val else "needs_review"
+    bank_str = str(bank_val) if bank_val else "Pending Bank Details"
+
     draft_id = f"SAH-2026-{int(time.time()) % 900000 + 100000}"
+
     applicant_info = {
-        "Full Name": {"value": profile.get("full_name", "Rahul Sharma"), "status": "verified"},
-        "Date of Birth": {"value": "15-08-2004", "status": "verified"},
-        "Annual Income": {"value": f"₹{profile.get('annual_income', 210000):,}", "status": "verified"},
-        "Bank Account": {"value": "XXXX-XXXX-4321", "status": "verified"},
+        "Full Name": {"value": full_name, "status": "verified" if profile.get("full_name") else "needs_review"},
+        "Date of Birth / Age": {"value": dob_val or "Pending verification", "status": dob_status},
+        "Annual Income": {"value": income_str, "status": income_status},
+        "Bank Account": {"value": bank_str, "status": bank_status},
+        "Location": {"value": profile.get("location", "Not specified"), "status": "verified" if profile.get("location") else "needs_review"},
+        "Category": {"value": profile.get("caste_category", "General"), "status": "verified" if profile.get("caste_category") else "needs_review"},
     }
 
     # Persist draft to applications table
+    scheme = None
+    if supabase_admin and scheme_id:
+        try:
+            s_res = supabase_admin.table("schemes").select("name, benefit").eq("id", scheme_id).maybe_single().execute()
+            scheme = s_res.data
+        except Exception as se:
+            logger.warning(f"Could not load scheme details for application draft: {se}")
+
+    if not scheme and state.get("candidate_schemes"):
+        candidates = state.get("candidate_schemes") or []
+        scheme = next((s for s in candidates if s.get("id") == scheme_id), candidates[0] if candidates else None)
+
+    scheme_name = scheme.get("name", "Government Welfare Scheme") if scheme else "Government Welfare Scheme"
+    scheme_benefit = scheme.get("benefit", "Government Support") if scheme else "Government Support"
+
+    ai_summary = {
+        "scheme_name": scheme_name,
+        "benefit_summary": scheme_benefit,
+        "reasoning": f"Based on your query ('{state.get('query', '')}'), {scheme_name} provides targeted {scheme_benefit.lower()}.",
+        "verified_count": sum(1 for v in applicant_info.values() if isinstance(v, dict) and v.get("status") == "verified"),
+        "review_count": sum(1 for v in applicant_info.values() if isinstance(v, dict) and v.get("status") != "verified"),
+        "key_takeaways": [
+            f"Direct Benefit: {scheme_benefit}",
+            "You can review and edit all fields below before submitting.",
+            "Once submitted, Tracker Agent will monitor department verification SLAs."
+        ],
+        "suggested_questions": [
+            f"What are the disbursement steps for {scheme_name}?",
+            "How long does the verification review usually take?",
+            "Can I modify my application details after submission?"
+        ]
+    }
+
     if supabase_admin and citizen_id and scheme_id:
         try:
-            supabase_admin.table("applications").upsert({
-                "citizen_id": citizen_id,
-                "scheme_id": scheme_id,
-                "status": "awaiting_approval",
-                "applicant_info": applicant_info,
-                "tracking_id": draft_id,
-                "source_run_id": run_id,
-            }, on_conflict="citizen_id,scheme_id").execute()
-            logger.info(f"Persisted application draft {draft_id} for citizen_id={citizen_id}")
+            existing = (
+                supabase_admin.table("applications")
+                .select("id")
+                .eq("citizen_id", citizen_id)
+                .eq("scheme_id", scheme_id)
+                .in_("status", ["draft", "awaiting_approval", "pending_citizen_approval"])
+                .execute()
+            )
+            if existing.data and len(existing.data) > 0:
+                app_id = existing.data[0]["id"]
+                supabase_admin.table("applications").update({
+                    "status": "awaiting_approval",
+                    "applicant_info": applicant_info,
+                    "tracking_id": draft_id,
+                    "source_run_id": run_id,
+                    "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }).eq("id", app_id).execute()
+                logger.info(f"Updated existing application draft {draft_id} (id={app_id}) for citizen_id={citizen_id}")
+            else:
+                supabase_admin.table("applications").insert({
+                    "citizen_id": citizen_id,
+                    "scheme_id": scheme_id,
+                    "status": "awaiting_approval",
+                    "applicant_info": applicant_info,
+                    "tracking_id": draft_id,
+                    "source_run_id": run_id,
+                }).execute()
+                logger.info(f"Persisted new application draft {draft_id} for citizen_id={citizen_id}")
         except Exception as e:
             logger.error(f"Error persisting application draft: {e}")
 
@@ -956,25 +1255,34 @@ def application_agent_node(state: SahayakState) -> Dict[str, Any]:
         "scheme_id": scheme_id,
         "status": "awaiting_approval",
         "applicant_info": applicant_info,
+        "ai_summary": ai_summary,
     }
 
     write_agent_event(
         run_id,
         "Application Agent",
         f"Application draft #{draft_id} created and ready for citizen approval.",
-        {"application_draft": application_draft, "event_code": "APPLICATION_DRAFT_CREATED"},
+        {"application_draft": application_draft, "ai_summary": ai_summary, "event_code": "APPLICATION_DRAFT_CREATED"},
         event_code="APPLICATION_DRAFT_CREATED",
     )
 
-    # Update agent_runs status to COMPLETED
+    # Update agent_runs status to COMPLETED and clear pending requirements
     if supabase_admin and run_id:
         try:
             supabase_admin.table("agent_runs").update({
                 "status": "COMPLETED",
+                "pending_requirements": [],
                 "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }).eq("id", run_id).execute()
         except Exception as e:
-            logger.error(f"Error updating agent_run status: {e}")
+            logger.warning(f"Error updating agent_run status with pending_requirements: {e}")
+            try:
+                supabase_admin.table("agent_runs").update({
+                    "status": "COMPLETED",
+                    "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }).eq("id", run_id).execute()
+            except Exception as e2:
+                logger.error(f"Error updating agent_run status to COMPLETED: {e2}")
 
     return {"application_draft": application_draft}
 
@@ -1071,28 +1379,20 @@ def tracker_agent_node(state: SahayakState) -> Dict[str, Any]:
 def route_eligibility(state: SahayakState) -> str:
     """Conditional Edge: Routes to application_agent if all verified, else document_agent."""
     result = state.get("eligibility_result") or {}
-    retry_count = state.get("retry_count", 0)
-
     if result.get("is_eligible", False):
         return "application_agent"
-    
-    if retry_count < 1:
-        return "document_agent"
-    
-    # Cap loop at 1 retry: update status to ACTION REQUIRED and stop
-    run_id = state.get("run_id")
-    if supabase_admin and run_id:
-        try:
-            supabase_admin.table("agent_runs").update({
-                "status": "ACTION REQUIRED",
-                "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            }).eq("id", run_id).execute()
-        except Exception as e:
-            logger.error(f"Error updating run status: {e}")
-    return END
+    return "document_agent"
+
+def route_document(state: SahayakState) -> str:
+    """Conditional Edge from Document Agent: Stops if docs are missing (ACTION REQUIRED), else application_agent."""
+    missing = state.get("missing_documents") or []
+    if missing:
+        # Halt graph execution — wait for citizen to upload required document
+        return END
+    return "application_agent"
 
 def create_sahayak_graph() -> StateGraph:
-    """Builds and compiles the Sahayak LangGraph workflow."""
+    """Builds and compiles the full Sahayak LangGraph workflow."""
     workflow = StateGraph(SahayakState)
 
     workflow.add_node("citizen_agent", citizen_agent_node)
@@ -1100,6 +1400,7 @@ def create_sahayak_graph() -> StateGraph:
     workflow.add_node("eligibility_agent", eligibility_agent_node)
     workflow.add_node("document_agent", document_agent_node)
     workflow.add_node("application_agent", application_agent_node)
+    workflow.add_node("tracker_agent", tracker_agent_node)
 
     workflow.set_entry_point("citizen_agent")
     workflow.add_edge("citizen_agent", "scheme_agent")
@@ -1111,14 +1412,58 @@ def create_sahayak_graph() -> StateGraph:
         {
             "application_agent": "application_agent",
             "document_agent": "document_agent",
+        }
+    )
+
+    workflow.add_conditional_edges(
+        "document_agent",
+        route_document,
+        {
+            "application_agent": "application_agent",
             END: END,
         }
     )
 
-    workflow.add_edge("document_agent", "eligibility_agent")
-    workflow.add_edge("application_agent", END)
+    workflow.add_edge("application_agent", "tracker_agent")
+    workflow.add_edge("tracker_agent", END)
 
     return workflow.compile()
 
-# Singleton compiled agent graph
+def create_resumed_graph() -> StateGraph:
+    """Builds and compiles the resumed sub-graph starting at eligibility verification."""
+    workflow = StateGraph(SahayakState)
+
+    workflow.add_node("eligibility_agent", eligibility_agent_node)
+    workflow.add_node("document_agent", document_agent_node)
+    workflow.add_node("application_agent", application_agent_node)
+    workflow.add_node("tracker_agent", tracker_agent_node)
+
+    workflow.set_entry_point("eligibility_agent")
+
+    workflow.add_conditional_edges(
+        "eligibility_agent",
+        route_eligibility,
+        {
+            "application_agent": "application_agent",
+            "document_agent": "document_agent",
+        }
+    )
+
+    workflow.add_conditional_edges(
+        "document_agent",
+        route_document,
+        {
+            "application_agent": "application_agent",
+            END: END,
+        }
+    )
+
+    workflow.add_edge("application_agent", "tracker_agent")
+    workflow.add_edge("tracker_agent", END)
+
+    return workflow.compile()
+
+# Singleton compiled agent graphs
 sahayak_agent_workflow = create_sahayak_graph()
+sahayak_resumed_workflow = create_resumed_graph()
+

@@ -29,17 +29,130 @@ export function useAgentRun() {
   const [activeAgentIndex, setActiveAgentIndex] = useState<number>(-1);
   const [latestData, setLatestData] = useState<Record<string, any>>({});
   const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
+  const [isConnecting, setIsConnecting] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
   const eventsChannelRef = useRef<any>(null);
   const runsChannelRef = useRef<any>(null);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Clear timeout helper
-  const clearRunTimeout = () => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
+  const clearTimers = () => {
+    if (connectingTimerRef.current) {
+      clearTimeout(connectingTimerRef.current);
+      connectingTimerRef.current = null;
+    }
+    if (idleTimerRef.current) {
+      clearTimeout(idleTimerRef.current);
+      idleTimerRef.current = null;
     }
   };
+
+  const clearPolling = () => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  };
+
+  // Process a newly received or polled event
+  const handleIncomingEvent = useCallback((newEvent: LiveAgentEvent) => {
+    setEvents((prev) => {
+      if (prev.some((e) => e.id === newEvent.id || (e.action === newEvent.action && e.agent_name === newEvent.agent_name))) {
+        return prev;
+      }
+      return [...prev, newEvent];
+    });
+
+    setIsConnecting(false);
+    setIsReconnecting(false);
+
+    // Update active agent index based on agent name
+    const agentName = newEvent.agent_name.toLowerCase();
+    if (agentName.includes("citizen")) {
+      setActiveAgentIndex(0);
+    } else if (agentName.includes("scheme")) {
+      setActiveAgentIndex(1);
+    } else if (agentName.includes("eligibility")) {
+      setActiveAgentIndex(2);
+    } else if (agentName.includes("document")) {
+      setActiveAgentIndex(3);
+    } else if (agentName.includes("application")) {
+      setActiveAgentIndex(4);
+    } else if (agentName.includes("tracker")) {
+      setActiveAgentIndex(5);
+    }
+
+    if (newEvent.details) {
+      setLatestData((prev) => ({ ...prev, ...newEvent.details }));
+      const missing = newEvent.details.missing_documents;
+      const pending = newEvent.details.pending_requirements;
+      const nextAction = newEvent.details.next_action;
+      
+      if (newEvent.details.application_draft || newEvent.details.event_code === "APPLICATION_DRAFT_CREATED") {
+        setStatus("COMPLETED");
+        setActiveAgentIndex(4);
+      } else if (
+        (Array.isArray(missing) && missing.length > 0) ||
+        (Array.isArray(pending) && pending.length > 0) ||
+        nextAction?.type === "upload_document"
+      ) {
+        setStatus((current) => (current === "COMPLETED" ? "COMPLETED" : "ACTION_REQUIRED"));
+      }
+    }
+  }, []);
+
+  // REST polling fallback: Only fires when WebSocket is reconnecting/errored, or as a slow 6s safety heartbeat
+  useEffect(() => {
+    if (!runId || !isSupabaseConfigured || (status !== "PROCESSING" && !isReconnecting)) {
+      clearPolling();
+      return;
+    }
+
+    const pollRunState = async () => {
+      try {
+        // 1. Fetch agent events for the run
+        const { data: polledEvents } = await supabase
+          .from("agent_events")
+          .select("*")
+          .eq("run_id", runId)
+          .order("created_at", { ascending: true });
+
+        if (polledEvents && polledEvents.length > 0) {
+          polledEvents.forEach((ev) => handleIncomingEvent(ev as LiveAgentEvent));
+        }
+
+        // 2. Fetch agent run status
+        const { data: runRecord } = await supabase
+          .from("agent_runs")
+          .select("status")
+          .eq("id", runId)
+          .maybeSingle();
+
+        if (runRecord?.status) {
+          if (runRecord.status === "COMPLETED") {
+            setStatus("COMPLETED");
+            setActiveAgentIndex(5);
+            clearPolling();
+          } else if (runRecord.status === "ACTION REQUIRED" || runRecord.status === "ACTION_REQUIRED") {
+            setStatus((curr) => (curr === "COMPLETED" ? "COMPLETED" : "ACTION_REQUIRED"));
+          } else if (runRecord.status === "ERROR" || runRecord.status === "FAILED") {
+            setStatus("ERROR");
+            clearPolling();
+          }
+        }
+      } catch (err) {
+        console.warn("[useAgentRun] Polling notice:", err);
+      }
+    };
+
+    // If WebSocket is actively reconnecting, poll every 3s; otherwise slow 6s watchdog
+    const pollInterval = isReconnecting ? 3000 : 6000;
+    pollIntervalRef.current = setInterval(pollRunState, pollInterval);
+
+    return () => clearPolling();
+  }, [runId, status, isReconnecting, handleIncomingEvent]);
 
   // Subscribe to agent_events (message feed) and agent_runs (status ground truth)
   useEffect(() => {
@@ -52,6 +165,18 @@ export function useAgentRun() {
     if (runsChannelRef.current) {
       supabase.removeChannel(runsChannelRef.current);
     }
+
+    // Set a 12-second connecting watchdog
+    connectingTimerRef.current = setTimeout(() => {
+      setIsConnecting(true);
+    }, 12000);
+
+    // Set a 90-second safety notice (non-fatal, prompts user)
+    idleTimerRef.current = setTimeout(() => {
+      if (status === "PROCESSING") {
+        setIsConnecting(false);
+      }
+    }, 90000);
 
     // Channel 1: agent_events — live message feed for the run
     const eventsChannel = supabase
@@ -66,31 +191,7 @@ export function useAgentRun() {
         },
         (payload) => {
           const newEvent = payload.new as LiveAgentEvent;
-          setEvents((prev) => [...prev, newEvent]);
-
-          // Receiving any event means the run is alive — cancel the timeout
-          clearRunTimeout();
-          setIsReconnecting(false);
-
-          // Update active agent index based on agent name (display only, not status ground truth)
-          const agentName = newEvent.agent_name.toLowerCase();
-          if (agentName.includes("citizen")) {
-            setActiveAgentIndex(0);
-          } else if (agentName.includes("scheme")) {
-            setActiveAgentIndex(1);
-          } else if (agentName.includes("eligibility")) {
-            setActiveAgentIndex(2);
-          } else if (agentName.includes("document")) {
-            setActiveAgentIndex(3);
-          } else if (agentName.includes("application")) {
-            setActiveAgentIndex(4);
-          } else if (agentName.includes("tracker")) {
-            setActiveAgentIndex(5);
-          }
-
-          if (newEvent.details) {
-            setLatestData((prev) => ({ ...prev, ...newEvent.details }));
-          }
+          handleIncomingEvent(newEvent);
         },
       )
       .subscribe((subStatus) => {
@@ -103,7 +204,7 @@ export function useAgentRun() {
 
     eventsChannelRef.current = eventsChannel;
 
-    // Channel 2: agent_runs — STATUS is the ground truth (not inferred from agent names)
+    // Channel 2: agent_runs — STATUS is the ground truth
     const runsChannel = supabase
       .channel(`agent_runs_status:${runId}`)
       .on(
@@ -118,8 +219,8 @@ export function useAgentRun() {
           const updatedStatus = payload.new?.status as string | undefined;
           if (!updatedStatus) return;
 
-          // Cancel timeout — the run completed (one way or another)
-          clearRunTimeout();
+          clearTimers();
+          setIsConnecting(false);
           setIsReconnecting(false);
 
           if (updatedStatus === "COMPLETED") {
@@ -129,6 +230,9 @@ export function useAgentRun() {
             setStatus("ACTION_REQUIRED");
           } else if (updatedStatus === "ERROR" || updatedStatus === "FAILED") {
             setStatus("ERROR");
+            setErrorMessage("Agent workflow encountered an error on the backend.");
+          } else if (updatedStatus === "PROCESSING") {
+            setStatus("PROCESSING");
           }
         },
       )
@@ -137,7 +241,8 @@ export function useAgentRun() {
     runsChannelRef.current = runsChannel;
 
     return () => {
-      clearRunTimeout();
+      clearTimers();
+      clearPolling();
       if (eventsChannelRef.current) {
         supabase.removeChannel(eventsChannelRef.current);
       }
@@ -145,22 +250,17 @@ export function useAgentRun() {
         supabase.removeChannel(runsChannelRef.current);
       }
     };
-  }, [runId]);
+  }, [runId, handleIncomingEvent, status]);
 
   const startRun = useCallback(async (query: string) => {
-    clearRunTimeout();
+    clearTimers();
+    clearPolling();
     setStatus("PROCESSING");
     setEvents([]);
     setLatestData({});
     setActiveAgentIndex(0);
-
-    const generatedRunId = `run-${Date.now()}`;
-    setRunId(generatedRunId);
-
-    // 45-second safety timeout — multi-agent LangGraph workflow coordinates 6 specialized LLM agents
-    timeoutRef.current = setTimeout(() => {
-      setStatus("ERROR");
-    }, 45000);
+    setErrorMessage(null);
+    setIsConnecting(false);
 
     if (isSupabaseConfigured) {
       try {
@@ -183,23 +283,78 @@ export function useAgentRun() {
         if (res.ok) {
           const data = await res.json();
           if (data.run_id) {
-            // Use the server-assigned run_id so our Realtime subscriptions match the DB row
+            // Set the REAL server-assigned run_id to avoid channel race
             setRunId(data.run_id);
             return data.run_id;
           }
-        } else if (res.status === 401) {
-          // Auth error — surface immediately, don't wait for timeout
-          clearRunTimeout();
+        } else {
+          const errBody = await res.json().catch(() => ({}));
+          const msg = errBody.error || `Server responded with ${res.status}`;
           setStatus("ERROR");
+          setErrorMessage(msg);
+          return null;
         }
-      } catch (err) {
-        console.warn("[useAgentRun] Edge function error:", err);
-        // Don't clear timeout — let it fire naturally if no events arrive
+      } catch (err: any) {
+        console.error("[useAgentRun] Network or edge function dispatch failure:", err);
+        setStatus("ERROR");
+        setErrorMessage(err.message || "Failed to reach AI workforce service. Please check your connection.");
+        return null;
       }
+    } else {
+      // Local demo offline mode
+      const offlineRunId = `demo-run-${Date.now()}`;
+      setRunId(offlineRunId);
+      return offlineRunId;
     }
 
-    return generatedRunId;
+    return null;
   }, []);
+
+  const loadRunById = useCallback(async (existingRunId: string) => {
+    clearTimers();
+    clearPolling();
+    setRunId(existingRunId);
+    setEvents([]);
+    setLatestData({});
+    setErrorMessage(null);
+    setIsConnecting(false);
+
+    if (!isSupabaseConfigured) return;
+
+    try {
+      const { data: runRecord } = await supabase
+        .from("agent_runs")
+        .select("*")
+        .eq("id", existingRunId)
+        .maybeSingle();
+
+      const { data: eventRecords } = await supabase
+        .from("agent_events")
+        .select("*")
+        .eq("run_id", existingRunId)
+        .order("created_at", { ascending: true });
+
+      if (eventRecords && eventRecords.length > 0) {
+        eventRecords.forEach((ev) => handleIncomingEvent(ev as LiveAgentEvent));
+      }
+
+      if (runRecord) {
+        if (runRecord.status === "COMPLETED") {
+          setStatus("COMPLETED");
+          setActiveAgentIndex(5);
+        } else if (runRecord.status === "ACTION REQUIRED" || runRecord.status === "ACTION_REQUIRED") {
+          setStatus("ACTION_REQUIRED");
+          setActiveAgentIndex(3);
+        } else if (runRecord.status === "PROCESSING") {
+          setStatus("PROCESSING");
+        } else if (runRecord.status === "ERROR" || runRecord.status === "FAILED") {
+          setStatus("ERROR");
+        }
+      }
+    } catch (err) {
+      console.warn("Error loading past run:", err);
+    }
+  }, [handleIncomingEvent]);
 
   return {
     runId,
@@ -208,6 +363,10 @@ export function useAgentRun() {
     activeAgentIndex,
     latestData,
     isReconnecting,
+    isConnecting,
+    errorMessage,
     startRun,
+    loadRunById,
+    setStatus,
   };
 }

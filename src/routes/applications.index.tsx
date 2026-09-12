@@ -1,9 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { Bot, ChevronRight, FileText, Clock, Plus, Loader2, FolderOpen, ArrowLeft, FileCheck2 } from "lucide-react";
+import { useEffect, useState, useCallback } from "react";
+import { Bot, ChevronRight, FileText, Clock, Plus, Loader2, FolderOpen, ArrowLeft, FileCheck2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AppShell } from "@/components/sahayak";
-import { requireAuth, getSession } from "@/lib/auth";
+import { requireAuth, getSession, getCurrentProfile } from "@/lib/auth";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { CANONICAL_SCHEME_LIST } from "@/lib/scheme-constants";
 
@@ -16,6 +16,7 @@ export const Route = createFileRoute("/applications/")({
 
 interface AppItem {
   id: string;
+  trackingId?: string;
   schemeName: string;
   status: string;
   date: string;
@@ -25,6 +26,7 @@ interface AppItem {
 const FALLBACK_APPS: AppItem[] = [
   {
     id: "SAH-2026-004281",
+    trackingId: "SAH-2026-004281",
     schemeName: "National Means-cum-Merit Scholarship",
     status: "Awaiting your approval",
     date: "Prepared recently",
@@ -37,77 +39,82 @@ function ApplicationsPage() {
     isSupabaseConfigured ? [] : FALLBACK_APPS,
   );
   const [loading, setLoading] = useState(isSupabaseConfigured);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const loadApplications = useCallback(async () => {
+    try {
+      const [session, profile] = await Promise.all([
+        getSession(),
+        getCurrentProfile().catch(() => null),
+      ]);
+      const userId = profile?.id || session?.user?.id;
+
+      if (!userId) {
+        setLoading(false);
+        setIsRefreshing(false);
+        return;
+      }
+
+      if (!isSupabaseConfigured) {
+        setApplications(FALLBACK_APPS);
+        setLoading(false);
+        setIsRefreshing(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("applications")
+        .select("*, schemes(name)")
+        .eq("citizen_id", userId)
+        .order("created_at", { ascending: false });
+
+      if (!error && data) {
+        const mapped: AppItem[] = data.map((row: any) => {
+          const schemeName =
+            row.schemes?.name ||
+            CANONICAL_SCHEME_LIST.find((s) => s.id === row.scheme_id)?.name ||
+            "Government Scheme Application";
+
+          const isAwaitingApproval =
+            row.status === "draft" ||
+            row.status === "pending_citizen_approval" ||
+            row.status === "awaiting_approval";
+
+          return {
+            id: row.id,
+            trackingId: row.tracking_id || row.id,
+            schemeName,
+            status:
+              row.status === "draft" ||
+              row.status === "awaiting_approval" ||
+              row.status === "pending_citizen_approval"
+                ? "Awaiting your approval"
+                : row.status === "pending_admin_review" || row.status === "under_review"
+                  ? "Under Department Review"
+                  : row.status === "submitted"
+                    ? "Submitted to Portal"
+                    : row.status === "approved"
+                      ? "Approved & Disbursed"
+                      : row.status === "rejected"
+                        ? "Action Required / Rejected"
+                        : row.status,
+            date: row.created_at ? new Date(row.created_at).toLocaleDateString() : "Today",
+            actionReady: isAwaitingApproval,
+          };
+        });
+        setApplications(mapped);
+      }
+    } catch (err) {
+      console.warn("[Sahayak] Failed to load citizen applications:", err);
+    } finally {
+      setLoading(false);
+      setIsRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let active = true;
-
-    async function loadApplications() {
-      try {
-        const session = await getSession();
-        if (!session?.user?.id) {
-          if (active) setLoading(false);
-          return;
-        }
-
-        if (!isSupabaseConfigured) {
-          if (active) {
-            setApplications(FALLBACK_APPS);
-            setLoading(false);
-          }
-          return;
-        }
-
-        const { data, error } = await supabase
-          .from("applications")
-          .select("*, schemes(name)")
-          .eq("citizen_id", session.user.id)
-          .order("created_at", { ascending: false });
-
-        if (!error && active) {
-          const mapped: AppItem[] = (data || []).map((row: any) => {
-            const schemeName =
-              row.schemes?.name ||
-              CANONICAL_SCHEME_LIST.find((s) => s.id === row.scheme_id)?.name ||
-              "Government Scheme Application";
-
-            const isAwaitingApproval =
-              row.status === "draft" || row.status === "pending_citizen_approval";
-
-            return {
-              id: row.id,
-              schemeName,
-              status:
-                row.status === "draft"
-                  ? "Awaiting your approval"
-                  : row.status === "pending_citizen_approval"
-                    ? "Awaiting your approval"
-                    : row.status === "pending_admin_review"
-                      ? "Under Department Review"
-                      : row.status === "submitted"
-                        ? "Submitted to Portal"
-                        : row.status === "approved"
-                          ? "Approved & Disbursed"
-                          : row.status === "rejected"
-                            ? "Action Required / Rejected"
-                            : row.status,
-              date: row.created_at ? new Date(row.created_at).toLocaleDateString() : "Today",
-              actionReady: isAwaitingApproval,
-            };
-          });
-          setApplications(mapped);
-        }
-      } catch (err) {
-        console.warn("[Sahayak] Failed to load citizen applications:", err);
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-
     loadApplications();
-    return () => {
-      active = false;
-    };
-  }, []);
+  }, [loadApplications]);
 
   return (
     <AppShell>
@@ -143,11 +150,26 @@ function ApplicationsPage() {
               Review drafts prepared by Sahayak, provide human consent, and track official status.
             </p>
           </div>
-          <Button asChild>
-            <Link to="/assistant">
-              <Plus className="mr-1.5 size-4" /> Start New Application
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setIsRefreshing(true);
+                loadApplications();
+              }}
+              disabled={isRefreshing || loading}
+              className="gap-1.5 h-9 text-xs border-line bg-card shadow-sm"
+            >
+              <RefreshCw className={`size-3.5 ${isRefreshing ? "animate-spin text-brand" : "text-muted-foreground"}`} />
+              Refresh
+            </Button>
+            <Button asChild>
+              <Link to="/assistant">
+                <Plus className="mr-1.5 size-4" /> Start New Application
+              </Link>
+            </Button>
+          </div>
         </div>
 
         {loading ? (
@@ -191,7 +213,9 @@ function ApplicationsPage() {
                       )}
                     </div>
                     <div>
-                      <p className="text-xs font-mono text-muted-foreground mb-1">ID: {app.id}</p>
+                      <p className="text-xs font-mono text-muted-foreground mb-1">
+                        Tracking ID: {app.trackingId || app.id}
+                      </p>
                       <h3 className="text-xl font-semibold mb-1 group-hover:text-brand transition-colors">
                         {app.schemeName}
                       </h3>

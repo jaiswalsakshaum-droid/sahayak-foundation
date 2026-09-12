@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -15,10 +16,20 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 
 try:
-    from agent_graph import sahayak_agent_workflow, write_agent_event, tracker_agent_node
+    from agent_graph import (
+        sahayak_agent_workflow,
+        sahayak_resumed_workflow,
+        write_agent_event,
+        tracker_agent_node,
+    )
     from document_extractor import extract_document_data
 except ImportError:
-    from backend.agent_graph import sahayak_agent_workflow, write_agent_event, tracker_agent_node
+    from backend.agent_graph import (
+        sahayak_agent_workflow,
+        sahayak_resumed_workflow,
+        write_agent_event,
+        tracker_agent_node,
+    )
     from backend.document_extractor import extract_document_data
 
 load_dotenv()
@@ -43,6 +54,8 @@ app.add_middleware(
 INTERNAL_SECRET = os.getenv("INTERNAL_SHARED_SECRET", "")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
 supabase_admin: Optional[Client] = None
 if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
@@ -94,33 +107,44 @@ class TrackRequest(BaseModel):
     tracking_id: str
     scheme_name: str
 
+class ResumeRequest(BaseModel):
+    force_complete: Optional[bool] = Field(default=False, description="Proceed to draft generation even with missing docs")
+
 # ==============================================================================
 # Background Runners
 # ==============================================================================
 
 async def run_langgraph_task(run_id: str, citizen_id: str, query: str):
     """Executes the LangGraph agent graph in background without blocking response."""
+    import time
     logger.info(f"Starting background LangGraph run for run_id={run_id}")
     
-    # 1. Fetch citizen profile from Supabase with snake_case method
-    citizen_profile = {
-        "full_name": "Rahul Sharma",
-        "age": 20,
-        "location": "Lucknow, Uttar Pradesh",
-        "occupation": "Student / Agricultural Assistant",
-        "annual_income": 210000,
-        "caste_category": "OBC",
-    }
+    citizen_profile = {}
 
     if supabase_admin and citizen_id:
         try:
             res = supabase_admin.table("profiles").select("*").eq("id", citizen_id).maybe_single().execute()
             if res.data:
                 citizen_profile = res.data
+            else:
+                logger.error(f"Profile not found for citizen_id={citizen_id}")
+                write_agent_event(run_id, "System", "Citizen profile not found. Please complete your profile before evaluating schemes.", event_code="PROFILE_MISSING")
+                if supabase_admin:
+                    supabase_admin.table("agent_runs").update({
+                        "status": "FAILED",
+                        "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    }).eq("id", run_id).execute()
+                return
         except Exception as e:
             logger.error(f"Could not load citizen profile for citizen_id={citizen_id}: {e}")
+            write_agent_event(run_id, "System", f"Error loading citizen profile: {str(e)[:100]}", event_code="PROFILE_ERROR")
+            if supabase_admin:
+                supabase_admin.table("agent_runs").update({
+                    "status": "FAILED",
+                    "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }).eq("id", run_id).execute()
+            return
 
-    # 2. Initial state
     initial_state = {
         "run_id": run_id,
         "citizen_id": citizen_id,
@@ -131,6 +155,7 @@ async def run_langgraph_task(run_id: str, citizen_id: str, query: str):
         "selected_scheme_id": None,
         "eligibility_result": None,
         "missing_documents": None,
+        "pending_requirements": None,
         "application_draft": None,
         "next_action": None,
         "retry_count": 0,
@@ -138,18 +163,175 @@ async def run_langgraph_task(run_id: str, citizen_id: str, query: str):
     }
 
     try:
-        # Run graph
         sahayak_agent_workflow.invoke(initial_state)
         logger.info(f"LangGraph execution finished successfully for run_id={run_id}")
     except Exception as e:
         logger.error(f"Error executing LangGraph for run_id={run_id}: {e}")
-        write_agent_event(run_id, "System", f"Workflow notice: {str(e)[:120]}")
+        write_agent_event(run_id, "System", f"Workflow execution issue: {str(e)[:120]}", event_code="WORKFLOW_ERROR")
+        if supabase_admin and run_id:
+            try:
+                supabase_admin.table("agent_runs").update({
+                    "status": "FAILED",
+                    "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }).eq("id", run_id).execute()
+            except Exception as ue:
+                logger.error(f"Error updating agent_run error status: {ue}")
+
+async def run_resumed_langgraph_task(run_id: str, force_complete: bool = False):
+    """Resumes an existing paused agent_run after required documents have been uploaded or user forces continue."""
+    import time
+    logger.info(f"Resuming background LangGraph run for run_id={run_id} (force_complete={force_complete})")
+    if not supabase_admin:
+        logger.error("Supabase client not configured for resume task")
+        return
+
+    try:
+        # 1. Fetch agent_runs record
+        run_res = supabase_admin.table("agent_runs").select("*").eq("id", run_id).maybe_single().execute()
+        run_data = run_res.data
+        if not run_data:
+            logger.error(f"Cannot resume: agent_run {run_id} not found")
+            return
+
+        citizen_id = run_data.get("citizen_id", "")
+        selected_scheme_id = run_data.get("selected_scheme_id")
+
+        # If selected_scheme_id was not on run row, fallback to finding it in agent_events
+        if not selected_scheme_id:
+            events_res = supabase_admin.table("agent_events").select("details").eq("run_id", run_id).execute()
+            for ev in events_res.data or []:
+                details = ev.get("details") or {}
+                if "selected_scheme_id" in details and details["selected_scheme_id"]:
+                    selected_scheme_id = details["selected_scheme_id"]
+                    break
+
+        if not selected_scheme_id:
+            selected_scheme_id = "a0000000-0000-0000-0000-000000000001"
+
+        # 2. Fetch citizen profile
+        prof_res = supabase_admin.table("profiles").select("*").eq("id", citizen_id).maybe_single().execute()
+        citizen_profile = prof_res.data or {}
+
+        # 3. Flip status back to PROCESSING
+        try:
+            supabase_admin.table("agent_runs").update({
+                "status": "PROCESSING",
+            }).eq("id", run_id).execute()
+        except Exception:
+            pass
+
+        write_agent_event(
+            run_id,
+            "System",
+            "Resuming AI workforce: re-evaluating civic criteria with updated records...",
+            event_code="WORKFLOW_RESUMED",
+        )
+
+        resumed_state = {
+            "run_id": run_id,
+            "citizen_id": citizen_id,
+            "query": run_data.get("input_query", ""),
+            "citizen_profile": citizen_profile,
+            "intent": None,
+            "candidate_schemes": None,
+            "selected_scheme_id": selected_scheme_id,
+            "eligibility_result": None,
+            "missing_documents": None,
+            "pending_requirements": None,
+            "application_draft": None,
+            "next_action": None,
+            "retry_count": 1,
+            "error": None,
+        }
+
+        if force_complete:
+            write_agent_event(
+                run_id,
+                "Application Agent",
+                "Proceeding with available documents. Assembling application draft with review flags...",
+                {"thought": "Citizen chose to continue. Missing items will be tagged for manual review."}
+            )
+            from agent_graph import application_agent_node, tracker_agent_node
+            app_res = application_agent_node(resumed_state)
+            resumed_state.update(app_res)
+            tracker_agent_node(resumed_state)
+            
+            if supabase_admin and run_id:
+                try:
+                    supabase_admin.table("agent_runs").update({
+                        "status": "COMPLETED",
+                        "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    }).eq("id", run_id).execute()
+                    logger.info(f"Updated agent_run {run_id} to COMPLETED after force resume.")
+                except Exception as ue:
+                    logger.error(f"Error updating agent_run completed status on resume: {ue}")
+        else:
+            final_res = sahayak_resumed_workflow.invoke(resumed_state)
+            if supabase_admin and run_id:
+                missing = resumed_state.get("missing_documents")
+                if not missing or len(missing) == 0 or resumed_state.get("application_draft"):
+                    try:
+                        supabase_admin.table("agent_runs").update({
+                            "status": "COMPLETED",
+                            "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        }).eq("id", run_id).execute()
+                    except Exception as ue:
+                        logger.error(f"Error updating agent_run completed status: {ue}")
+
+        logger.info(f"Resumed LangGraph execution finished for run_id={run_id}")
+    except Exception as e:
+        logger.error(f"Error resuming LangGraph for run_id={run_id}: {e}")
+        write_agent_event(run_id, "System", f"Resume workflow issue: {str(e)[:120]}", event_code="WORKFLOW_ERROR")
+        if supabase_admin and run_id:
+            try:
+                supabase_admin.table("agent_runs").update({
+                    "status": "FAILED",
+                    "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }).eq("id", run_id).execute()
+            except Exception as ue:
+                logger.error(f"Error updating agent_run error status on resume: {ue}")
 
 async def run_document_extraction_task(document_id: str):
-    """Executes document intelligence extraction in the background."""
+    """Executes document intelligence extraction in the background and auto-resumes paused runs if applicable."""
     logger.info(f"Starting document extraction for document_id={document_id}")
     try:
-        extract_document_data(document_id)
+        # Find citizen_id and active run_id if any
+        if supabase_admin:
+            d_res = supabase_admin.table("documents").select("citizen_id, document_type").eq("id", document_id).maybe_single().execute()
+            if d_res.data:
+                c_id = d_res.data.get("citizen_id")
+                # Look for matching active/paused run
+                r_res = supabase_admin.table("agent_runs").select("id").eq("citizen_id", c_id).in_("status", ["PROCESSING", "ACTION REQUIRED"]).order("started_at", desc=True).limit(1).execute()
+                active_run_id = r_res.data[0]["id"] if (r_res.data and len(r_res.data) > 0) else None
+                if active_run_id:
+                    write_agent_event(
+                        active_run_id,
+                        "Document Agent",
+                        f"Vision AI (Gemini 3.6 Flash) is analyzing uploaded {d_res.data.get('document_type', 'document')}...",
+                        {"thought": "Processing multimodal OCR and extracting official civic fields."}
+                    )
+
+        extracted = extract_document_data(document_id)
+        
+        # Check if citizen has a paused agent_run that can be auto-resumed
+        if supabase_admin and extracted and extracted.get("document_type"):
+            doc_res = supabase_admin.table("documents").select("citizen_id, status, document_type").eq("id", document_id).maybe_single().execute()
+            if doc_res.data and doc_res.data.get("status") in ["verified", "needs_review"]:
+                c_id = doc_res.data.get("citizen_id")
+                verified_type = doc_res.data.get("document_type", "").lower()
+                
+                # Find runs in ACTION REQUIRED or ACTION_REQUIRED for this citizen
+                paused_runs = supabase_admin.table("agent_runs").select("id").eq("citizen_id", c_id).in_("status", ["ACTION REQUIRED", "ACTION_REQUIRED"]).execute()
+                for pr in paused_runs.data or []:
+                    logger.info(f"Auto-triggering resume for paused agent_run={pr['id']} after extraction of {verified_type}")
+                    write_agent_event(
+                        pr["id"],
+                        "Document Agent",
+                        f"Document verified ({doc_res.data.get('document_type')}). Auto-resuming workforce verification...",
+                        {"thought": "Uploaded document verified on file. Re-evaluating criteria."}
+                    )
+                    await run_resumed_langgraph_task(pr["id"], force_complete=False)
+                    break
     except Exception as e:
         logger.error(f"Error in document extraction for {document_id}: {e}")
 
@@ -163,9 +345,11 @@ def health_check():
     return {
         "status": "healthy",
         "service": "sahayak-langgraph-backend",
-        "version": "3.0.0",
+        "version": "3.1.0",
         "groq_configured": bool(os.getenv("GROQ_API_KEY")),
         "supabase_configured": bool(supabase_admin is not None),
+        "internal_secret_configured": bool(INTERNAL_SECRET),
+        "gemini_configured": bool(os.getenv("GOOGLE_API_KEY")),
     }
 
 @app.post("/run", status_code=status.HTTP_202_ACCEPTED)
@@ -182,13 +366,29 @@ async def start_orchestration(
         "message": "Orchestration started in background.",
     }
 
+@app.post("/run/{run_id}/resume", status_code=status.HTTP_202_ACCEPTED)
+async def resume_orchestration(
+    run_id: str,
+    background_tasks: BackgroundTasks,
+    req: Optional[ResumeRequest] = None,
+    _: bool = Depends(verify_internal_secret),
+):
+    """Resumes a paused multi-agent orchestration run after missing document upload or force complete."""
+    force = req.force_complete if req else False
+    background_tasks.add_task(run_resumed_langgraph_task, run_id, force)
+    return {
+        "status": "accepted",
+        "run_id": run_id,
+        "message": "Resumed orchestration started in background.",
+    }
+
 @app.post("/extract-document", status_code=status.HTTP_202_ACCEPTED)
 async def extract_document(
     req: ExtractDocumentRequest,
     background_tasks: BackgroundTasks,
     _: bool = Depends(verify_internal_secret),
 ):
-    """Triggers Groq Vision / OCR Document Intelligence extraction on an uploaded file."""
+    """Triggers Gemini Vision / OCR Document Intelligence extraction on an uploaded file."""
     background_tasks.add_task(run_document_extraction_task, req.document_id)
     return {
         "status": "accepted",
@@ -248,4 +448,191 @@ def run_tracker_sweep(
         "message": "Tracker sweep executed successfully.",
         "result": result,
     }
+
+
+class FollowUpChatRequest(BaseModel):
+    run_id: Optional[str] = None
+    citizen_id: Optional[str] = None
+    message: str = Field(description="Citizen question or clarification")
+    context: Optional[Dict[str, Any]] = None
+
+@app.post("/chat/followup", status_code=status.HTTP_200_OK)
+def handle_followup_chat(
+    req: FollowUpChatRequest,
+    _: bool = Depends(verify_internal_secret),
+):
+    """
+    Answers citizen follow-up questions regarding evaluated schemes,
+    eligibility, application status, or requirements using Groq/Gemini.
+    """
+    context_str = ""
+    if req.context:
+        scheme_name = req.context.get("scheme_name", "Welfare Scheme")
+        benefit = req.context.get("benefit", "")
+        missing_docs = req.context.get("missing_documents", [])
+        context_str = f"Target Scheme: {scheme_name}\nBenefit: {benefit}\nMissing Documents: {missing_docs}\n"
+
+    system_prompt = (
+        "You are Sahayak AI, an empathetic, highly knowledgeable civic guide assisting Indian citizens. "
+        "Answer the citizen's question concisely in 2-3 clear sentences with exact, actionable advice. "
+        "Keep language simple, welcoming, and empowering."
+    )
+    user_prompt = f"{context_str}Citizen Question: {req.message}"
+
+    answer = "Sahayak AI: We have noted your inquiry. You can review and edit all application fields before final submission."
+
+    # Try Groq first for sub-second response
+    if GROQ_API_KEY:
+        try:
+            from groq import Groq
+            client = Groq(api_key=GROQ_API_KEY)
+            model_name = os.getenv("MODEL_FAST", "openai/gpt-oss-20b")
+            resp = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_tokens=250,
+                temperature=0.2,
+            )
+            ans = resp.choices[0].message.content
+            if ans and len(ans.strip()) > 5:
+                answer = ans.strip()
+        except Exception as e:
+            logger.warning(f"Groq followup chat failed: {e}")
+            if GOOGLE_API_KEY:
+                try:
+                    from google import genai
+                    ai_client = genai.Client(api_key=GOOGLE_API_KEY)
+                    gemini_resp = ai_client.models.generate_content(
+                        model=os.getenv("GEMINI_MODEL", "gemini-3.6-flash"),
+                        contents=f"{system_prompt}\n\n{user_prompt}",
+                    )
+                    if gemini_resp and gemini_resp.text:
+                        answer = gemini_resp.text.strip()
+                except Exception as ge:
+                    logger.warning(f"Gemini followup chat fallback failed: {ge}")
+
+    # Log event if run_id provided
+    if req.run_id and supabase_admin:
+        try:
+            write_agent_event(
+                req.run_id,
+                "Citizen Assistant",
+                answer,
+                {"citizen_question": req.message, "thought": "Answered citizen follow-up inquiry."}
+            )
+        except Exception:
+            pass
+
+    return {
+        "status": "success",
+        "answer": answer,
+    }
+
+
+class UpdateDraftRequest(BaseModel):
+    applicant_info: Dict[str, Any]
+
+@app.post("/applications/{tracking_id}/update", status_code=status.HTTP_200_OK)
+def update_application_draft(
+    tracking_id: str,
+    req: UpdateDraftRequest,
+    _: bool = Depends(verify_internal_secret),
+):
+    """Updates applicant attributes for an existing application draft."""
+    if not supabase_admin:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    try:
+        res = supabase_admin.table("applications").update({
+            "applicant_info": req.applicant_info,
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }).eq("tracking_id", tracking_id).execute()
+
+        return {
+            "status": "success",
+            "tracking_id": tracking_id,
+            "message": "Application draft attributes updated successfully.",
+            "data": res.data,
+        }
+    except Exception as e:
+        logger.error(f"Error updating draft {tracking_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SubmitApplicationRequest(BaseModel):
+    citizen_id: str
+    consent_recorded: bool = True
+    scheme_id: Optional[str] = None
+    applicant_info: Optional[Dict[str, Any]] = None
+
+@app.post("/applications/{tracking_id}/submit", status_code=status.HTTP_200_OK)
+def submit_application(
+    tracking_id: str,
+    req: SubmitApplicationRequest,
+    background_tasks: BackgroundTasks,
+    _: bool = Depends(verify_internal_secret),
+):
+    """Submits an application draft and triggers real-time tracking."""
+    if not supabase_admin:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    try:
+        now_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        # Try updating by tracking_id first
+        res = supabase_admin.table("applications").update({
+            "status": "submitted",
+            "updated_at": now_str,
+        }).eq("tracking_id", tracking_id).execute()
+
+        # If not found by tracking_id, try by primary key id
+        if not res.data:
+            res = supabase_admin.table("applications").update({
+                "status": "submitted",
+                "updated_at": now_str,
+            }).eq("id", tracking_id).execute()
+
+        # If still not found and citizen_id is present, insert new application record
+        if not res.data and req.citizen_id:
+            scheme_id = req.scheme_id or "a0000000-0000-0000-0000-000000000001"
+            res = supabase_admin.table("applications").insert({
+                "citizen_id": req.citizen_id,
+                "scheme_id": scheme_id,
+                "tracking_id": tracking_id,
+                "status": "submitted",
+                "applicant_info": req.applicant_info or {},
+                "updated_at": now_str,
+            }).execute()
+
+        # Add notification for citizen
+        try:
+            supabase_admin.table("notifications").insert({
+                "citizen_id": req.citizen_id,
+                "title": "Application Submitted Successfully",
+                "message": f"Your application (#{tracking_id}) has been submitted and assigned for departmental verification.",
+                "type": "application_update",
+                "read": False,
+            }).execute()
+        except Exception as ne:
+            logger.warning(f"Could not create notification: {ne}")
+
+        # Trigger tracker sweep in background
+        background_tasks.add_task(
+            run_tracker_sweep,
+            TrackerRunRequest(citizen_id=req.citizen_id)
+        )
+
+        return {
+            "status": "success",
+            "tracking_id": tracking_id,
+            "submitted_at": now_str,
+            "message": "Application submitted successfully.",
+            "data": res.data if hasattr(res, 'data') else [],
+        }
+    except Exception as e:
+        logger.error(f"Error submitting application {tracking_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 

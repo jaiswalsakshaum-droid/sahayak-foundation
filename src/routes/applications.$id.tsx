@@ -350,9 +350,13 @@ export function ApplicationDetailPage() {
                   </span>
                   <div className="flex items-center justify-between">
                     <span className="font-medium text-sm">
-                      {typeof item === "object" ? item.value : String(item)}
+                      {typeof item === "object" && item !== null
+                        ? item.value !== undefined && item.value !== null && item.value !== ""
+                          ? String(item.value)
+                          : "—"
+                        : String(item ?? "—")}
                     </span>
-                    {typeof item === "object" && item.status === "verified" && (
+                    {typeof item === "object" && item?.status === "verified" && (
                       <span className="inline-flex items-center gap-1 text-[11px] text-sage font-medium">
                         <CheckCircle2 className="size-3.5" /> Verified
                       </span>
