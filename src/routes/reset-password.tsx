@@ -155,7 +155,10 @@ function ResetPasswordPage() {
                 </Button>
 
                 <p className="text-center text-sm text-muted-foreground pt-2">
-                  <Link to="/login" className="font-medium text-brand hover:underline inline-flex items-center gap-1">
+                  <Link
+                    to="/login"
+                    className="font-medium text-brand hover:underline inline-flex items-center gap-1"
+                  >
                     <ArrowLeft className="size-3.5" /> Back to Sign In
                   </Link>
                 </p>

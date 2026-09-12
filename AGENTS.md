@@ -1,12 +1,12 @@
-<!-- LOVABLE:BEGIN -->
+# Sahayak Foundation — Agent Guidelines
 
-> [!IMPORTANT]
-> This project is connected to [Lovable](https://lovable.dev). Avoid rewriting
-> published git history — force pushing, or rebasing/amending/squashing commits
-> that are already pushed — as it rewrites history on Lovable's side and the
-> user will likely lose their project history.
->
-> Commits you push to the connected branch sync back to Lovable and show up in
-> the editor, so keep the branch in a working state.
+## Tech Stack & Architecture
 
-<!-- LOVABLE:END -->
+- **Frontend**: React 19, TanStack Start & Router, TanStack Query, Tailwind CSS, shadcn/ui.
+- **Backend**: FastAPI (Python 3.11+), LangGraph multi-agent architecture.
+- **Data & Auth**: Supabase (PostgreSQL, Storage, Realtime, Auth).
+
+## Development Guidelines
+
+- Always ensure frontend builds cleanly (`npm run build`) and passes typecheck/linting (`npm run lint`, `npm run test`).
+- Backend runs with FastAPI/Uvicorn on port 8000.

@@ -350,17 +350,9 @@ export function DocumentCard({
   );
 }
 
-export function ApplicationTimeline({
-  items,
-}: {
-  items?: Array<[string, string, Status]>;
-}) {
+export function ApplicationTimeline({ items }: { items?: Array<[string, string, Status]> }) {
   const defaultItems: Array<[string, string, Status]> = [
-    [
-      "Eligibility check",
-      "Eligibility Agent · Discover schemes with Assistant",
-      "idle" as Status,
-    ],
+    ["Eligibility check", "Eligibility Agent · Discover schemes with Assistant", "idle" as Status],
     [
       "Document verification",
       "Document Agent · Upload credentials in Document Center",

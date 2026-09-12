@@ -68,7 +68,8 @@ function formatFieldValue(val: any): string {
     if (val.val !== undefined && val.val !== null && val.val !== "") return String(val.val);
     if (val.text !== undefined && val.text !== null && val.text !== "") return String(val.text);
     if (val.name !== undefined && val.name !== null && val.name !== "") return String(val.name);
-    if (val.requirement !== undefined && val.requirement !== null && val.requirement !== "") return String(val.requirement);
+    if (val.requirement !== undefined && val.requirement !== null && val.requirement !== "")
+      return String(val.requirement);
     if (Array.isArray(val)) return val.map(formatFieldValue).join(", ");
     try {
       const keys = Object.keys(val).filter((k) => k !== "status");
@@ -84,7 +85,9 @@ function formatFieldValue(val: any): string {
 function AdminControlCenter() {
   const queryClient = useQueryClient();
   const [selectedApp, setSelectedApp] = useState<PendingReviewApplication | null>(null);
-  const [reviewAction, setReviewAction] = useState<"approved" | "rejected" | "request_info" | null>(null);
+  const [reviewAction, setReviewAction] = useState<"approved" | "rejected" | "request_info" | null>(
+    null,
+  );
   const [actionReason, setActionReason] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -126,9 +129,14 @@ function AdminControlCenter() {
     },
     onSuccess: (data) => {
       const actionText =
-        data.action === "approved" ? "Approved" : data.action === "rejected" ? "Rejected" : "Information Requested";
+        data.action === "approved"
+          ? "Approved"
+          : data.action === "rejected"
+            ? "Rejected"
+            : "Information Requested";
       toast.success(`Application ${actionText}`, {
-        description: "Application decision committed to database and recorded in immutable audit log.",
+        description:
+          "Application decision committed to database and recorded in immutable audit log.",
       });
       queryClient.invalidateQueries({ queryKey: ["admin"] });
       setReviewAction(null);
@@ -140,7 +148,10 @@ function AdminControlCenter() {
     },
   });
 
-  const handleOpenReviewModal = (app: PendingReviewApplication, action: "approved" | "rejected" | "request_info") => {
+  const handleOpenReviewModal = (
+    app: PendingReviewApplication,
+    action: "approved" | "rejected" | "request_info",
+  ) => {
     setSelectedApp(app);
     setReviewAction(action);
     setActionReason(
@@ -206,7 +217,8 @@ function AdminControlCenter() {
               {metricsQuery.isLoading ? "—" : metrics?.applications_total.toLocaleString() || 0}
             </p>
             <p className="text-[11px] text-slate-400 mt-1">
-              {metrics?.applications_by_status.approved || 0} approved · {metrics?.applications_by_status.rejected || 0} rejected
+              {metrics?.applications_by_status.approved || 0} approved ·{" "}
+              {metrics?.applications_by_status.rejected || 0} rejected
             </p>
           </div>
 
@@ -302,7 +314,9 @@ function AdminControlCenter() {
               onClick={() => queryClient.invalidateQueries({ queryKey: ["admin"] })}
               className="border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 h-8 text-xs"
             >
-              <RefreshCw className={`size-3.5 mr-1.5 ${queueQuery.isRefetching ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`size-3.5 mr-1.5 ${queueQuery.isRefetching ? "animate-spin" : ""}`}
+              />
               Refresh
             </Button>
 
@@ -326,7 +340,9 @@ function AdminControlCenter() {
                 <ScrollText className="size-4 text-indigo-400" />
                 Immutable System & Human Audit Trail
               </h3>
-              <span className="text-[11px] text-slate-400">Cryptographically ordered & persisted</span>
+              <span className="text-[11px] text-slate-400">
+                Cryptographically ordered & persisted
+              </span>
             </div>
 
             {auditQuery.isLoading ? (
@@ -353,8 +369,8 @@ function AdminControlCenter() {
                             entry.result === "APPROVED" || entry.result === "ACTIVE"
                               ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
                               : entry.result === "REJECTED"
-                              ? "bg-rose-950 text-rose-300 border border-rose-800"
-                              : "bg-slate-800 text-slate-300"
+                                ? "bg-rose-950 text-rose-300 border border-rose-800"
+                                : "bg-slate-800 text-slate-300"
                           }`}
                         >
                           {entry.result}
@@ -383,7 +399,8 @@ function AdminControlCenter() {
             <CheckCircle2 className="size-10 text-emerald-400 mx-auto mb-3" />
             <h3 className="text-base font-semibold text-white">Review Queue Clear</h3>
             <p className="text-xs text-slate-400 max-w-sm mx-auto mt-1">
-              All submitted applications have been processed or no pending cases match your active filter.
+              All submitted applications have been processed or no pending cases match your active
+              filter.
             </p>
           </div>
         ) : (
@@ -402,7 +419,8 @@ function AdminControlCenter() {
                     <div>
                       <h4 className="text-sm font-bold text-white">{app.citizen_name}</h4>
                       <p className="text-xs text-slate-400">
-                        {app.citizen_location || "Location not specified"} {app.citizen_phone ? `· ${app.citizen_phone}` : ""}
+                        {app.citizen_location || "Location not specified"}{" "}
+                        {app.citizen_phone ? `· ${app.citizen_phone}` : ""}
                       </p>
                     </div>
                   </div>
@@ -413,8 +431,8 @@ function AdminControlCenter() {
                         app.status === "approved"
                           ? "bg-emerald-950/80 text-emerald-300 border border-emerald-800/50"
                           : app.status === "rejected"
-                          ? "bg-rose-950/80 text-rose-300 border border-rose-800/50"
-                          : "bg-amber-950/80 text-amber-300 border border-amber-800/50"
+                            ? "bg-rose-950/80 text-rose-300 border border-rose-800/50"
+                            : "bg-amber-950/80 text-amber-300 border border-amber-800/50"
                       }`}
                     >
                       {app.status.replace("_", " ")}
@@ -446,7 +464,8 @@ function AdminControlCenter() {
                     <div className="space-y-1.5 scrollbar-none">
                       {Object.keys(app.applicant_info || {}).length > 0 ? (
                         Object.entries(app.applicant_info).map(([k, v]: [string, any]) => {
-                          const isVerified = typeof v === "object" && v !== null && v.status === "verified";
+                          const isVerified =
+                            typeof v === "object" && v !== null && v.status === "verified";
                           const formattedVal = formatFieldValue(v);
                           return (
                             <div
@@ -455,18 +474,26 @@ function AdminControlCenter() {
                             >
                               <span className="text-slate-400 font-medium shrink-0">{k}:</span>
                               <div className="flex items-center gap-1.5 min-w-0 text-right">
-                                <span className="text-slate-200 font-medium truncate" title={formattedVal}>
+                                <span
+                                  className="text-slate-200 font-medium truncate"
+                                  title={formattedVal}
+                                >
                                   {formattedVal}
                                 </span>
                                 {isVerified && (
-                                  <CheckCircle2 className="size-3 text-emerald-400 shrink-0" title="Verified by OCR" />
+                                  <CheckCircle2
+                                    className="size-3 text-emerald-400 shrink-0"
+                                    title="Verified by OCR"
+                                  />
                                 )}
                               </div>
                             </div>
                           );
                         })
                       ) : (
-                        <p className="text-[11px] text-slate-500 italic">No custom fields extracted.</p>
+                        <p className="text-[11px] text-slate-500 italic">
+                          No custom fields extracted.
+                        </p>
                       )}
                     </div>
                   </div>
@@ -548,7 +575,8 @@ function AdminControlCenter() {
             <DialogDescription className="text-xs text-slate-400">
               {selectedApp && (
                 <span>
-                  Case Tracking ID: <strong className="text-slate-200 font-mono">{selectedApp.tracking_id}</strong> (
+                  Case Tracking ID:{" "}
+                  <strong className="text-slate-200 font-mono">{selectedApp.tracking_id}</strong> (
                   {selectedApp.citizen_name})
                 </span>
               )}
@@ -566,8 +594,8 @@ function AdminControlCenter() {
                   reviewAction === "approved"
                     ? "Enter validation notes regarding eligibility confirmation and verified records..."
                     : reviewAction === "rejected"
-                    ? "Specify the regulatory grounds for rejection (e.g., income ceiling exceeded, invalid documents)..."
-                    : "Specify the exact missing documents or clarifications required from the citizen..."
+                      ? "Specify the regulatory grounds for rejection (e.g., income ceiling exceeded, invalid documents)..."
+                      : "Specify the exact missing documents or clarifications required from the citizen..."
                 }
                 value={actionReason}
                 onChange={(e) => setActionReason(e.target.value)}
@@ -576,7 +604,8 @@ function AdminControlCenter() {
             </div>
 
             <p className="text-[11px] text-slate-400 leading-relaxed">
-              This action will update the citizen's application state in real-time, generate a citizen portal notification, and write an immutable audit log record.
+              This action will update the citizen's application state in real-time, generate a
+              citizen portal notification, and write an immutable audit log record.
             </p>
           </div>
 
@@ -601,8 +630,8 @@ function AdminControlCenter() {
                 reviewAction === "approved"
                   ? "bg-emerald-600 hover:bg-emerald-500"
                   : reviewAction === "rejected"
-                  ? "bg-rose-600 hover:bg-rose-500"
-                  : "bg-amber-600 hover:bg-amber-500"
+                    ? "bg-rose-600 hover:bg-rose-500"
+                    : "bg-amber-600 hover:bg-amber-500"
               }`}
             >
               {reviewMutation.isPending ? (

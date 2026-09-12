@@ -13,9 +13,7 @@ export const isSupabaseConfigured = Boolean(
 
 if (typeof window !== "undefined") {
   if (isSupabaseConfigured) {
-    console.info(
-      `[Sahayak Boot] Supabase connected successfully: ${supabaseUrl}`,
-    );
+    console.info(`[Sahayak Boot] Supabase connected successfully: ${supabaseUrl}`);
   } else {
     console.warn(
       "[Sahayak Boot] Supabase environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY) are not set or invalid. Running with local fallback mode.",
@@ -39,4 +37,3 @@ export const supabase = createClient(
     },
   },
 );
-

@@ -134,7 +134,10 @@ export async function getAdminMetrics(): Promise<AdminMetrics> {
       const [citizensRes, appsRes, docsRes, eventsRes, runsRes] = await Promise.all([
         supabase.from("profiles").select("id", { count: "exact", head: true }),
         supabase.from("applications").select("status"),
-        supabase.from("documents").select("id", { count: "exact", head: true }).eq("status", "verified"),
+        supabase
+          .from("documents")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "verified"),
         supabase.from("agent_events").select("id", { count: "exact", head: true }),
         supabase
           .from("agent_runs")
@@ -165,7 +168,8 @@ export async function getAdminMetrics(): Promise<AdminMetrics> {
         let validCnt = 0;
         runsRes.data.forEach((r) => {
           if (r.started_at && r.completed_at) {
-            const diff = (new Date(r.completed_at).getTime() - new Date(r.started_at).getTime()) / 1000;
+            const diff =
+              (new Date(r.completed_at).getTime() - new Date(r.started_at).getTime()) / 1000;
             if (diff > 0 && diff < 7200) {
               totalSec += diff;
               validCnt++;
@@ -229,12 +233,72 @@ export async function getLiveWorkforceStatus(): Promise<AgentWorkforceMember[]> 
   }
 
   const defaultAgents: AgentWorkforceMember[] = [
-    { id: "citizen", name: "Citizen Agent", role: "Intent Parser & Citizen Context", status: "ONLINE", tasks_processed: 0, error_count: 0, error_rate: "0%", last_active: null, last_action: "Idle" },
-    { id: "scheme", name: "Scheme Agent", role: "Civic Knowledge Retrieval", status: "ONLINE", tasks_processed: 0, error_count: 0, error_rate: "0%", last_active: null, last_action: "Idle" },
-    { id: "eligibility", name: "Eligibility Agent", role: "Deterministic Rules Evaluation", status: "ONLINE", tasks_processed: 0, error_count: 0, error_rate: "0%", last_active: null, last_action: "Idle" },
-    { id: "document", name: "Document Agent", role: "Gemini Vision & Verification", status: "ONLINE", tasks_processed: 0, error_count: 0, error_rate: "0%", last_active: null, last_action: "Idle" },
-    { id: "application", name: "Application Agent", role: "Form Payload Compilation", status: "ONLINE", tasks_processed: 0, error_count: 0, error_rate: "0%", last_active: null, last_action: "Idle" },
-    { id: "tracker", name: "Tracker Agent", role: "SLA & Status Monitoring", status: "ONLINE", tasks_processed: 0, error_count: 0, error_rate: "0%", last_active: null, last_action: "Idle" },
+    {
+      id: "citizen",
+      name: "Citizen Agent",
+      role: "Intent Parser & Citizen Context",
+      status: "ONLINE",
+      tasks_processed: 0,
+      error_count: 0,
+      error_rate: "0%",
+      last_active: null,
+      last_action: "Idle",
+    },
+    {
+      id: "scheme",
+      name: "Scheme Agent",
+      role: "Civic Knowledge Retrieval",
+      status: "ONLINE",
+      tasks_processed: 0,
+      error_count: 0,
+      error_rate: "0%",
+      last_active: null,
+      last_action: "Idle",
+    },
+    {
+      id: "eligibility",
+      name: "Eligibility Agent",
+      role: "Deterministic Rules Evaluation",
+      status: "ONLINE",
+      tasks_processed: 0,
+      error_count: 0,
+      error_rate: "0%",
+      last_active: null,
+      last_action: "Idle",
+    },
+    {
+      id: "document",
+      name: "Document Agent",
+      role: "Gemini Vision & Verification",
+      status: "ONLINE",
+      tasks_processed: 0,
+      error_count: 0,
+      error_rate: "0%",
+      last_active: null,
+      last_action: "Idle",
+    },
+    {
+      id: "application",
+      name: "Application Agent",
+      role: "Form Payload Compilation",
+      status: "ONLINE",
+      tasks_processed: 0,
+      error_count: 0,
+      error_rate: "0%",
+      last_active: null,
+      last_action: "Idle",
+    },
+    {
+      id: "tracker",
+      name: "Tracker Agent",
+      role: "SLA & Status Monitoring",
+      status: "ONLINE",
+      tasks_processed: 0,
+      error_count: 0,
+      error_rate: "0%",
+      last_active: null,
+      last_action: "Idle",
+    },
   ];
 
   if (isSupabaseConfigured) {
@@ -247,7 +311,9 @@ export async function getLiveWorkforceStatus(): Promise<AgentWorkforceMember[]> 
 
       if (events) {
         return defaultAgents.map((agent) => {
-          const matched = events.filter((e) => e.agent_name === agent.name || e.agent_name?.toLowerCase().includes(agent.id));
+          const matched = events.filter(
+            (e) => e.agent_name === agent.name || e.agent_name?.toLowerCase().includes(agent.id),
+          );
           const lastE = matched[0];
           return {
             ...agent,
@@ -435,7 +501,8 @@ export async function reviewApplication(
 
       if (fetchErr || !appRow) return err("Application not found.");
 
-      const newStatus = action === "approved" ? "approved" : action === "rejected" ? "rejected" : "under_review";
+      const newStatus =
+        action === "approved" ? "approved" : action === "rejected" ? "rejected" : "under_review";
       const nowIso = new Date().toISOString();
 
       await supabase
@@ -450,7 +517,12 @@ export async function reviewApplication(
       await supabase.from("audit_logs").insert({
         run_id: appRow.source_run_id || null,
         agent_name: "Human Reviewer",
-        action: action === "approved" ? "APPLICATION_APPROVED" : action === "rejected" ? "APPLICATION_REJECTED" : "MORE_INFO_REQUESTED",
+        action:
+          action === "approved"
+            ? "APPLICATION_APPROVED"
+            : action === "rejected"
+              ? "APPLICATION_REJECTED"
+              : "MORE_INFO_REQUESTED",
         evidence: notes.trim(),
         result: newStatus.toUpperCase(),
       });
@@ -481,7 +553,10 @@ export async function getAdminSchemes(): Promise<AdminSchemeDetail[]> {
   if (!isSupabaseConfigured) return [];
 
   try {
-    const { data, error } = await supabase.from("schemes").select(`
+    const { data, error } = await supabase
+      .from("schemes")
+      .select(
+        `
       id,
       name,
       category,
@@ -503,7 +578,9 @@ export async function getAdminSchemes(): Promise<AdminSchemeDetail[]> {
         rule_type,
         evidence_source
       )
-    `).order("name");
+    `,
+      )
+      .order("name");
 
     if (error || !data) return [];
 
@@ -545,7 +622,9 @@ export async function updateAdminSchemeStatus(
       body: JSON.stringify({ status }),
     });
     if (res.ok) return ok(true);
-  } catch {}
+  } catch {
+    // Fallback to direct Supabase call if backend endpoint is unavailable
+  }
 
   if (isSupabaseConfigured) {
     try {
@@ -582,7 +661,12 @@ export async function createAdminScheme(scheme: {
   benefit: string;
   description: string;
   official_source: string;
-  rules: { criterion_name: string; requirement: string; rule_type: string; evidence_source?: string }[];
+  rules: {
+    criterion_name: string;
+    requirement: string;
+    rule_type: string;
+    evidence_source?: string;
+  }[];
   documents: { document_type: string; is_mandatory: boolean }[];
 }): Promise<ServiceResult<string>> {
   try {
@@ -609,7 +693,9 @@ export async function createAdminScheme(scheme: {
       const json = await res.json();
       return ok(json.scheme_id);
     }
-  } catch {}
+  } catch {
+    // Fallback to direct Supabase call if backend endpoint is unavailable
+  }
 
   if (isSupabaseConfigured) {
     try {
@@ -679,7 +765,9 @@ export async function getAuditLogs(limit = 50): Promise<AuditLogEntry[]> {
       const data = await res.json();
       if (data.logs) return data.logs;
     }
-  } catch {}
+  } catch {
+    // Fallback to Supabase audit_logs table
+  }
 
   if (isSupabaseConfigured) {
     try {
@@ -709,7 +797,9 @@ export async function getSystemHealth(): Promise<SystemHealth> {
     if (res.ok) {
       return await res.json();
     }
-  } catch {}
+  } catch {
+    // Fallback to local default system health
+  }
 
   return {
     status: isSupabaseConfigured ? "healthy" : "degraded",

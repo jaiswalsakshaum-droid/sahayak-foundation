@@ -59,7 +59,13 @@ export function useAgentRun() {
   // Process a newly received or polled event
   const handleIncomingEvent = useCallback((newEvent: LiveAgentEvent) => {
     setEvents((prev) => {
-      if (prev.some((e) => e.id === newEvent.id || (e.action === newEvent.action && e.agent_name === newEvent.agent_name))) {
+      if (
+        prev.some(
+          (e) =>
+            e.id === newEvent.id ||
+            (e.action === newEvent.action && e.agent_name === newEvent.agent_name),
+        )
+      ) {
         return prev;
       }
       return [...prev, newEvent];
@@ -89,8 +95,11 @@ export function useAgentRun() {
       const missing = newEvent.details.missing_documents;
       const pending = newEvent.details.pending_requirements;
       const nextAction = newEvent.details.next_action;
-      
-      if (newEvent.details.application_draft || newEvent.details.event_code === "APPLICATION_DRAFT_CREATED") {
+
+      if (
+        newEvent.details.application_draft ||
+        newEvent.details.event_code === "APPLICATION_DRAFT_CREATED"
+      ) {
         setStatus("COMPLETED");
         setActiveAgentIndex(4);
       } else if (
@@ -135,7 +144,10 @@ export function useAgentRun() {
             setStatus("COMPLETED");
             setActiveAgentIndex(5);
             clearPolling();
-          } else if (runRecord.status === "ACTION REQUIRED" || runRecord.status === "ACTION_REQUIRED") {
+          } else if (
+            runRecord.status === "ACTION REQUIRED" ||
+            runRecord.status === "ACTION_REQUIRED"
+          ) {
             setStatus((curr) => (curr === "COMPLETED" ? "COMPLETED" : "ACTION_REQUIRED"));
           } else if (runRecord.status === "ERROR" || runRecord.status === "FAILED") {
             setStatus("ERROR");
@@ -297,7 +309,9 @@ export function useAgentRun() {
       } catch (err: any) {
         console.error("[useAgentRun] Network or edge function dispatch failure:", err);
         setStatus("ERROR");
-        setErrorMessage(err.message || "Failed to reach AI workforce service. Please check your connection.");
+        setErrorMessage(
+          err.message || "Failed to reach AI workforce service. Please check your connection.",
+        );
         return null;
       }
     } else {
@@ -310,51 +324,57 @@ export function useAgentRun() {
     return null;
   }, []);
 
-  const loadRunById = useCallback(async (existingRunId: string) => {
-    clearTimers();
-    clearPolling();
-    setRunId(existingRunId);
-    setEvents([]);
-    setLatestData({});
-    setErrorMessage(null);
-    setIsConnecting(false);
+  const loadRunById = useCallback(
+    async (existingRunId: string) => {
+      clearTimers();
+      clearPolling();
+      setRunId(existingRunId);
+      setEvents([]);
+      setLatestData({});
+      setErrorMessage(null);
+      setIsConnecting(false);
 
-    if (!isSupabaseConfigured) return;
+      if (!isSupabaseConfigured) return;
 
-    try {
-      const { data: runRecord } = await supabase
-        .from("agent_runs")
-        .select("*")
-        .eq("id", existingRunId)
-        .maybeSingle();
+      try {
+        const { data: runRecord } = await supabase
+          .from("agent_runs")
+          .select("*")
+          .eq("id", existingRunId)
+          .maybeSingle();
 
-      const { data: eventRecords } = await supabase
-        .from("agent_events")
-        .select("*")
-        .eq("run_id", existingRunId)
-        .order("created_at", { ascending: true });
+        const { data: eventRecords } = await supabase
+          .from("agent_events")
+          .select("*")
+          .eq("run_id", existingRunId)
+          .order("created_at", { ascending: true });
 
-      if (eventRecords && eventRecords.length > 0) {
-        eventRecords.forEach((ev) => handleIncomingEvent(ev as LiveAgentEvent));
-      }
-
-      if (runRecord) {
-        if (runRecord.status === "COMPLETED") {
-          setStatus("COMPLETED");
-          setActiveAgentIndex(5);
-        } else if (runRecord.status === "ACTION REQUIRED" || runRecord.status === "ACTION_REQUIRED") {
-          setStatus("ACTION_REQUIRED");
-          setActiveAgentIndex(3);
-        } else if (runRecord.status === "PROCESSING") {
-          setStatus("PROCESSING");
-        } else if (runRecord.status === "ERROR" || runRecord.status === "FAILED") {
-          setStatus("ERROR");
+        if (eventRecords && eventRecords.length > 0) {
+          eventRecords.forEach((ev) => handleIncomingEvent(ev as LiveAgentEvent));
         }
+
+        if (runRecord) {
+          if (runRecord.status === "COMPLETED") {
+            setStatus("COMPLETED");
+            setActiveAgentIndex(5);
+          } else if (
+            runRecord.status === "ACTION REQUIRED" ||
+            runRecord.status === "ACTION_REQUIRED"
+          ) {
+            setStatus("ACTION_REQUIRED");
+            setActiveAgentIndex(3);
+          } else if (runRecord.status === "PROCESSING") {
+            setStatus("PROCESSING");
+          } else if (runRecord.status === "ERROR" || runRecord.status === "FAILED") {
+            setStatus("ERROR");
+          }
+        }
+      } catch (err) {
+        console.warn("Error loading past run:", err);
       }
-    } catch (err) {
-      console.warn("Error loading past run:", err);
-    }
-  }, [handleIncomingEvent]);
+    },
+    [handleIncomingEvent],
+  );
 
   const resetRun = useCallback(() => {
     clearTimers();
@@ -392,4 +412,3 @@ export function useAgentRun() {
     setStatus,
   };
 }
-

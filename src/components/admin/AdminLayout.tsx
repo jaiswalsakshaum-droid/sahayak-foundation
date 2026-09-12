@@ -74,7 +74,9 @@ export function AdminLayout({ children, title, subtitle }: AdminLayoutProps) {
                   Admin
                 </span>
               </div>
-              <p className="text-[10px] text-slate-400 font-medium tracking-tight">Civic Supervisory Console</p>
+              <p className="text-[10px] text-slate-400 font-medium tracking-tight">
+                Civic Supervisory Console
+              </p>
             </div>
           </Link>
           {onNavigate && (
@@ -259,7 +261,9 @@ export function AdminLayout({ children, title, subtitle }: AdminLayoutProps) {
         <footer className="border-t border-slate-900 bg-slate-950/90 py-4 text-xs text-slate-500">
           <div className="mx-auto max-w-7xl px-4 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
             <span>Sahayak National Civic Intelligence Platform · Administrative Console</span>
-            <span className="text-[11px] text-slate-500 font-mono">Zero Mock Policy Active · All queries hit live DB</span>
+            <span className="text-[11px] text-slate-500 font-mono">
+              Zero Mock Policy Active · All queries hit live DB
+            </span>
           </div>
         </footer>
       </main>

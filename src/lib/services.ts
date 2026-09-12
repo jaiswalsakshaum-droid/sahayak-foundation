@@ -271,7 +271,8 @@ export async function findRelevantSchemes(
   categoryFilter?: string,
 ): Promise<SchemeMatch[]> {
   const queryStr = typeof intentOrQuery === "string" ? intentOrQuery : "";
-  const intentCategory = typeof intentOrQuery === "object" ? intentOrQuery.category : categoryFilter;
+  const intentCategory =
+    typeof intentOrQuery === "object" ? intentOrQuery.category : categoryFilter;
 
   // Try backend dynamic discovery first if a query string was provided
   const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
@@ -295,9 +296,13 @@ export async function findRelevantSchemes(
             description: s.description || "",
             official: Boolean(s.official_source),
             officialSource: s.official_source,
-            reqDocs: s.document_requirements?.map((d: any) => (typeof d === "string" ? d : d.document_type)) || ["Aadhaar Card"],
+            reqDocs: s.document_requirements?.map((d: any) =>
+              typeof d === "string" ? d : d.document_type,
+            ) || ["Aadhaar Card"],
             eligibilityRules: s.eligibility_rules || [],
-            lastVerified: s.last_verified ? new Date(s.last_verified).toLocaleDateString() : "Verified Active",
+            lastVerified: s.last_verified
+              ? new Date(s.last_verified).toLocaleDateString()
+              : "Verified Active",
           }));
         }
         if (data.found === false) {
@@ -305,7 +310,10 @@ export async function findRelevantSchemes(
         }
       }
     } catch (err) {
-      console.warn("[Sahayak Services] Backend scheme discover failed, falling back to local DB:", err);
+      console.warn(
+        "[Sahayak Services] Backend scheme discover failed, falling back to local DB:",
+        err,
+      );
     }
   }
 
@@ -556,7 +564,7 @@ export async function validateDocument(
       // 1. Direct local backend dispatch for immediate Vision AI processing
       const backendUrl = import.meta.env["VITE_BACKEND_URL"] || "http://localhost:8000";
       const internalSecret = import.meta.env["VITE_INTERNAL_SECRET"] || "sahayak_dev_secret_123";
-      
+
       fetch(`${backendUrl}/extract-document`, {
         method: "POST",
         headers: {
@@ -602,7 +610,9 @@ export async function validateDocument(
 /**
  * Delete a citizen's document from the database and storage.
  */
-export async function deleteUserDocument(documentId: string): Promise<ServiceResult<{ success: boolean }>> {
+export async function deleteUserDocument(
+  documentId: string,
+): Promise<ServiceResult<{ success: boolean }>> {
   if (!isSupabaseConfigured) {
     return ok({ success: true });
   }
@@ -621,7 +631,10 @@ export async function deleteUserDocument(documentId: string): Promise<ServiceRes
 
     if (doc && doc.citizen_id === session.user.id) {
       if (doc.file_path) {
-        await supabase.storage.from("documents").remove([doc.file_path]).catch(() => {});
+        await supabase.storage
+          .from("documents")
+          .remove([doc.file_path])
+          .catch(() => {});
       }
     }
 
@@ -835,8 +848,9 @@ export async function submitApplication(
   }
 
   try {
-    const isUuid =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(applicationId);
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      applicationId,
+    );
 
     let updateQuery = supabase.from("applications").update({
       status: "submitted",
@@ -955,10 +969,18 @@ export async function updateApplicationDraft(
   // Try direct Supabase first
   if (isSupabaseConfigured) {
     try {
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trackingIdOrId);
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        trackingIdOrId,
+      );
       const query = isUuid
-        ? supabase.from("applications").update({ applicant_info: applicantInfo, updated_at: new Date().toISOString() }).eq("id", trackingIdOrId)
-        : supabase.from("applications").update({ applicant_info: applicantInfo, updated_at: new Date().toISOString() }).eq("tracking_id", trackingIdOrId);
+        ? supabase
+            .from("applications")
+            .update({ applicant_info: applicantInfo, updated_at: new Date().toISOString() })
+            .eq("id", trackingIdOrId)
+        : supabase
+            .from("applications")
+            .update({ applicant_info: applicantInfo, updated_at: new Date().toISOString() })
+            .eq("tracking_id", trackingIdOrId);
 
       const { error } = await query;
       if (!error) {
@@ -1007,10 +1029,20 @@ export async function submitApplicationDraft(
   // Try direct Supabase update first
   if (isSupabaseConfigured) {
     try {
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(trackingIdOrId);
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        trackingIdOrId,
+      );
       const { data: updatedRows } = isUuid
-        ? await supabase.from("applications").update({ status: "submitted", updated_at: nowIso }).eq("id", trackingIdOrId).select()
-        : await supabase.from("applications").update({ status: "submitted", updated_at: nowIso }).eq("tracking_id", trackingIdOrId).select();
+        ? await supabase
+            .from("applications")
+            .update({ status: "submitted", updated_at: nowIso })
+            .eq("id", trackingIdOrId)
+            .select()
+        : await supabase
+            .from("applications")
+            .update({ status: "submitted", updated_at: nowIso })
+            .eq("tracking_id", trackingIdOrId)
+            .select();
 
       if ((!updatedRows || updatedRows.length === 0) && citizenId) {
         await supabase.from("applications").insert({
@@ -1068,14 +1100,16 @@ export async function submitApplicationDraft(
 /**
  * Fetch past citizen inquiries and agent runs
  */
-export async function getCitizenRuns(citizenId: string): Promise<Array<{
-  id: string;
-  query: string;
-  status: string;
-  started_at: string;
-  completed_at?: string;
-  scheme_name?: string;
-}>> {
+export async function getCitizenRuns(citizenId: string): Promise<
+  Array<{
+    id: string;
+    query: string;
+    status: string;
+    started_at: string;
+    completed_at?: string;
+    scheme_name?: string;
+  }>
+> {
   if (!isSupabaseConfigured || !citizenId) {
     return [];
   }
@@ -1144,4 +1178,3 @@ export async function askAgentFollowUp(
 
   return "Sahayak AI: You can review and adjust all details above before finalizing your application.";
 }
-

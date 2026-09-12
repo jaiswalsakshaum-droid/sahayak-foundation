@@ -174,11 +174,15 @@ export async function adminSignIn(
         localStorage.setItem("sahayak_auth", "true");
         localStorage.setItem("sahayak_role", "admin");
       }
-      return { success: true, profile: { ...LOCAL_DEMO_PROFILE, role: "admin", full_name: "Admin Officer" } };
+      return {
+        success: true,
+        profile: { ...LOCAL_DEMO_PROFILE, role: "admin", full_name: "Admin Officer" },
+      };
     }
     return {
       success: false,
-      error: "Access denied: Invalid credentials or account does not have administrative privileges.",
+      error:
+        "Access denied: Invalid credentials or account does not have administrative privileges.",
     };
   }
 
@@ -191,7 +195,8 @@ export async function adminSignIn(
     if (signInError || !signInData.session) {
       return {
         success: false,
-        error: "Access denied: Invalid credentials or account does not have administrative privileges.",
+        error:
+          "Access denied: Invalid credentials or account does not have administrative privileges.",
       };
     }
 

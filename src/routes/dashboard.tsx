@@ -171,7 +171,10 @@ function DashboardPage() {
   // Morning: 04:00 - 11:59 | Afternoon: 12:00 - 16:59 | Evening: 17:00 - 03:59
   const istHour = (() => {
     try {
-      const istString = new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata", hour12: false });
+      const istString = new Date().toLocaleString("en-US", {
+        timeZone: "Asia/Kolkata",
+        hour12: false,
+      });
       return new Date(istString).getHours();
     } catch {
       return new Date().getHours();
@@ -226,7 +229,8 @@ function DashboardPage() {
               <div>
                 <p className="text-xs font-bold font-display">Administrator Mode Active</p>
                 <p className="text-[11px] text-slate-300">
-                  You have supervisory privileges. Switch to the administrative control center to review flagged applications and live workforce telemetry.
+                  You have supervisory privileges. Switch to the administrative control center to
+                  review flagged applications and live workforce telemetry.
                 </p>
               </div>
             </div>

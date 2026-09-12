@@ -7,10 +7,9 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
-import { useEffect, type ReactNode } from "react";
+import { type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
-import { reportLovableError } from "../lib/lovable-error-reporting";
 
 function NotFoundComponent() {
   return (
@@ -37,9 +36,6 @@ function NotFoundComponent() {
 function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
   const router = useRouter();
-  useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
-  }, [error]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
@@ -147,7 +143,8 @@ function RootComponent() {
         <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-1.5 text-center text-xs font-medium text-amber-700 dark:text-amber-300 flex items-center justify-center gap-2">
           <AlertTriangle className="size-3.5 text-amber-600 dark:text-amber-400" />
           <span>
-            <strong>DEMO MODE:</strong> Running with offline demo catalog. Live agent execution and database sync are inactive.
+            <strong>DEMO MODE:</strong> Running with offline demo catalog. Live agent execution and
+            database sync are inactive.
           </span>
         </div>
       )}

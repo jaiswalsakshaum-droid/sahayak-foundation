@@ -1,6 +1,17 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState, useCallback } from "react";
-import { Bot, ChevronRight, FileText, Clock, Plus, Loader2, FolderOpen, ArrowLeft, FileCheck2, RefreshCw } from "lucide-react";
+import {
+  Bot,
+  ChevronRight,
+  FileText,
+  Clock,
+  Plus,
+  Loader2,
+  FolderOpen,
+  ArrowLeft,
+  FileCheck2,
+  RefreshCw,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AppShell } from "@/components/sahayak";
 import { requireAuth, getSession, getCurrentProfile } from "@/lib/auth";
@@ -161,7 +172,9 @@ function ApplicationsPage() {
               disabled={isRefreshing || loading}
               className="gap-1.5 h-9 text-xs border-line bg-card shadow-sm"
             >
-              <RefreshCw className={`size-3.5 ${isRefreshing ? "animate-spin text-brand" : "text-muted-foreground"}`} />
+              <RefreshCw
+                className={`size-3.5 ${isRefreshing ? "animate-spin text-brand" : "text-muted-foreground"}`}
+              />
               Refresh
             </Button>
             <Button asChild>
@@ -182,7 +195,8 @@ function ApplicationsPage() {
             <FolderOpen className="size-10 mx-auto mb-3 text-muted-foreground/50" />
             <h3 className="font-semibold text-foreground text-base">No active applications yet</h3>
             <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto mb-6">
-              Use Sahayak AI Assistant to discover schemes you qualify for and prepare your application automatically.
+              Use Sahayak AI Assistant to discover schemes you qualify for and prepare your
+              application automatically.
             </p>
             <Button asChild size="sm">
               <Link to="/assistant">
@@ -253,7 +267,8 @@ function ApplicationsPage() {
         {/* Ecosystem Connection Footer */}
         <div className="rounded-xl border border-line bg-card p-4 text-xs text-muted-foreground flex flex-wrap items-center justify-between gap-2 mt-8">
           <span className="font-medium text-foreground">
-            Your connected ecosystem: Sahayak works alongside myScheme, UMANG and DigiLocker — it never replaces them.
+            Your connected ecosystem: Sahayak works alongside myScheme, UMANG and DigiLocker — it
+            never replaces them.
           </span>
           <Button asChild variant="link" size="sm" className="px-1 text-xs text-brand">
             <Link to="/profile">

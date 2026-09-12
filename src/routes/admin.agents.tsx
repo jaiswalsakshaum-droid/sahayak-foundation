@@ -38,7 +38,8 @@ export const Route = createFileRoute("/admin/agents")({
       { title: "AI Workforce Control Center — Sahayak Admin" },
       {
         name: "description",
-        content: "Real-time supervisory control, event stream, and health telemetry for the 6 specialized AI agents.",
+        content:
+          "Real-time supervisory control, event stream, and health telemetry for the 6 specialized AI agents.",
       },
     ],
   }),
@@ -55,12 +56,36 @@ const AGENT_ICONS: Record<string, any> = {
 };
 
 const AGENT_COLORS: Record<string, { badge: string; iconBg: string; text: string }> = {
-  citizen: { badge: "bg-blue-950 text-blue-300 border-blue-800", iconBg: "bg-blue-500/10 text-blue-400 border-blue-500/20", text: "text-blue-400" },
-  scheme: { badge: "bg-indigo-950 text-indigo-300 border-indigo-800", iconBg: "bg-indigo-500/10 text-indigo-400 border-indigo-500/20", text: "text-indigo-400" },
-  eligibility: { badge: "bg-emerald-950 text-emerald-300 border-emerald-800", iconBg: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20", text: "text-emerald-400" },
-  document: { badge: "bg-amber-950 text-amber-300 border-amber-800", iconBg: "bg-amber-500/10 text-amber-400 border-amber-500/20", text: "text-amber-400" },
-  application: { badge: "bg-purple-950 text-purple-300 border-purple-800", iconBg: "bg-purple-500/10 text-purple-400 border-purple-500/20", text: "text-purple-400" },
-  tracker: { badge: "bg-cyan-950 text-cyan-300 border-cyan-800", iconBg: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20", text: "text-cyan-400" },
+  citizen: {
+    badge: "bg-blue-950 text-blue-300 border-blue-800",
+    iconBg: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+    text: "text-blue-400",
+  },
+  scheme: {
+    badge: "bg-indigo-950 text-indigo-300 border-indigo-800",
+    iconBg: "bg-indigo-500/10 text-indigo-400 border-indigo-500/20",
+    text: "text-indigo-400",
+  },
+  eligibility: {
+    badge: "bg-emerald-950 text-emerald-300 border-emerald-800",
+    iconBg: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    text: "text-emerald-400",
+  },
+  document: {
+    badge: "bg-amber-950 text-amber-300 border-amber-800",
+    iconBg: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    text: "text-amber-400",
+  },
+  application: {
+    badge: "bg-purple-950 text-purple-300 border-purple-800",
+    iconBg: "bg-purple-500/10 text-purple-400 border-purple-500/20",
+    text: "text-purple-400",
+  },
+  tracker: {
+    badge: "bg-cyan-950 text-cyan-300 border-cyan-800",
+    iconBg: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
+    text: "text-cyan-400",
+  },
 };
 
 function AdminAgentsControlCenter() {
@@ -98,7 +123,9 @@ function AdminAgentsControlCenter() {
           <div className="flex items-center gap-3 rounded-xl border border-rose-500/40 bg-rose-950/30 p-4 text-rose-200">
             <AlertTriangle className="size-5 shrink-0 text-rose-400" />
             <div className="text-xs">
-              <span className="font-bold">Workforce Alert:</span> One or more agents encountered a processing failure or missing credential. Check the activity stream below for execution traces.
+              <span className="font-bold">Workforce Alert:</span> One or more agents encountered a
+              processing failure or missing credential. Check the activity stream below for
+              execution traces.
             </div>
           </div>
         )}
@@ -116,7 +143,9 @@ function AdminAgentsControlCenter() {
 
           <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
             <div className="flex items-center justify-between text-slate-400 mb-2">
-              <span className="text-xs font-medium uppercase tracking-wider">Total Tasks Executed</span>
+              <span className="text-xs font-medium uppercase tracking-wider">
+                Total Tasks Executed
+              </span>
               <Zap className="size-4 text-amber-400" />
             </div>
             <p className="text-2xl font-bold font-display text-white">
@@ -131,14 +160,18 @@ function AdminAgentsControlCenter() {
               <Activity className="size-4 text-emerald-400" />
             </div>
             <p className="text-2xl font-bold font-display text-emerald-300">
-              {agentsQuery.isLoading ? "—" : `${Math.max(0, 100 - (totalErrors / Math.max(1, totalTasks)) * 100).toFixed(1)}%`}
+              {agentsQuery.isLoading
+                ? "—"
+                : `${Math.max(0, 100 - (totalErrors / Math.max(1, totalTasks)) * 100).toFixed(1)}%`}
             </p>
             <p className="text-[11px] text-slate-400 mt-1">Operational success rate</p>
           </div>
 
           <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
             <div className="flex items-center justify-between text-slate-400 mb-2">
-              <span className="text-xs font-medium uppercase tracking-wider">Live Activity Pulse</span>
+              <span className="text-xs font-medium uppercase tracking-wider">
+                Live Activity Pulse
+              </span>
               <Radio className="size-4 text-rose-400 animate-pulse" />
             </div>
             <p className="text-2xl font-bold font-display text-white">{events.length} Events</p>
@@ -161,7 +194,9 @@ function AdminAgentsControlCenter() {
               }}
               className="border-slate-700 bg-slate-900 text-slate-300 hover:bg-slate-800 h-8 text-xs"
             >
-              <RefreshCw className={`size-3.5 mr-1.5 ${agentsQuery.isRefetching ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`size-3.5 mr-1.5 ${agentsQuery.isRefetching ? "animate-spin" : ""}`}
+              />
               Poll Telemetry
             </Button>
           </div>
@@ -190,7 +225,9 @@ function AdminAgentsControlCenter() {
                       {/* Top Header */}
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3">
-                          <div className={`flex size-10 items-center justify-center rounded-xl border ${styling.iconBg}`}>
+                          <div
+                            className={`flex size-10 items-center justify-center rounded-xl border ${styling.iconBg}`}
+                          >
                             <IconComponent className="size-5" />
                           </div>
                           <div>
@@ -204,8 +241,8 @@ function AdminAgentsControlCenter() {
                             agent.status === "ERROR"
                               ? "bg-rose-950 text-rose-300 border-rose-800"
                               : agent.status === "ONLINE"
-                              ? "bg-emerald-950 text-emerald-300 border-emerald-800"
-                              : "bg-slate-800 text-slate-400 border-slate-700"
+                                ? "bg-emerald-950 text-emerald-300 border-emerald-800"
+                                : "bg-slate-800 text-slate-400 border-slate-700"
                           }`}
                         >
                           <span
@@ -213,8 +250,8 @@ function AdminAgentsControlCenter() {
                               agent.status === "ONLINE"
                                 ? "bg-emerald-400 animate-pulse"
                                 : agent.status === "ERROR"
-                                ? "bg-rose-400"
-                                : "bg-slate-500"
+                                  ? "bg-rose-400"
+                                  : "bg-slate-500"
                             }`}
                           />
                           {agent.status}
@@ -224,19 +261,25 @@ function AdminAgentsControlCenter() {
                       {/* Execution Statistics */}
                       <div className="grid grid-cols-3 gap-2 py-3 border-y border-slate-800/80 my-3 text-center">
                         <div>
-                          <p className="text-[10px] text-slate-400 uppercase tracking-wider">Tasks</p>
+                          <p className="text-[10px] text-slate-400 uppercase tracking-wider">
+                            Tasks
+                          </p>
                           <p className="text-sm font-bold text-white mt-0.5 font-display">
                             {agent.tasks_processed}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[10px] text-slate-400 uppercase tracking-wider">Error Rate</p>
+                          <p className="text-[10px] text-slate-400 uppercase tracking-wider">
+                            Error Rate
+                          </p>
                           <p className="text-sm font-bold text-slate-200 mt-0.5 font-display">
                             {agent.error_rate}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[10px] text-slate-400 uppercase tracking-wider">Last Active</p>
+                          <p className="text-[10px] text-slate-400 uppercase tracking-wider">
+                            Last Active
+                          </p>
                           <p className="text-xs font-semibold text-slate-300 mt-0.5">
                             {agent.last_active
                               ? new Date(agent.last_active).toLocaleTimeString([], {
@@ -277,7 +320,9 @@ function AdminAgentsControlCenter() {
                 LIVE
               </span>
             </div>
-            <span className="text-xs text-slate-400">Showing recent agent actions executed in LangGraph backend</span>
+            <span className="text-xs text-slate-400">
+              Showing recent agent actions executed in LangGraph backend
+            </span>
           </div>
 
           {eventsQuery.isLoading ? (
@@ -287,7 +332,8 @@ function AdminAgentsControlCenter() {
             </div>
           ) : events.length === 0 ? (
             <p className="text-xs text-slate-500 py-6 text-center">
-              No recent agent events. Trigger an assistant query or upload a document to view real-time operations.
+              No recent agent events. Trigger an assistant query or upload a document to view
+              real-time operations.
             </p>
           ) : (
             <div className="max-h-96 overflow-y-auto space-y-2 pr-1 divide-y divide-slate-800/40 scrollbar-none">
@@ -303,7 +349,9 @@ function AdminAgentsControlCenter() {
                     className="pt-2.5 first:pt-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
                   >
                     <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
-                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold border shrink-0 ${styling.badge}`}>
+                      <span
+                        className={`rounded px-2 py-0.5 text-[10px] font-bold border shrink-0 ${styling.badge}`}
+                      >
                         {e.agent_name}
                       </span>
                       <p className="text-slate-200 text-xs font-medium truncate">{e.action}</p>

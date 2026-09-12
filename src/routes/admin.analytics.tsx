@@ -47,7 +47,8 @@ export const Route = createFileRoute("/admin/analytics")({
       { title: "Analytics & Telemetry — Sahayak Admin" },
       {
         name: "description",
-        content: "Aggregated live operational intelligence, bottleneck detection, and civic workflow metrics.",
+        content:
+          "Aggregated live operational intelligence, bottleneck detection, and civic workflow metrics.",
       },
     ],
   }),
@@ -115,7 +116,10 @@ function AdminAnalyticsPage() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `sahayak_admin_analytics_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute(
+      "download",
+      `sahayak_admin_analytics_${new Date().toISOString().slice(0, 10)}.csv`,
+    );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -169,7 +173,9 @@ function AdminAnalyticsPage() {
                 <Layers className="size-4 text-brand" />
                 Applications by Workflow Stage
               </h3>
-              <p className="text-xs text-slate-400">Distribution of cases across processing states</p>
+              <p className="text-xs text-slate-400">
+                Distribution of cases across processing states
+              </p>
             </div>
 
             <div className="h-64 w-full">
@@ -184,7 +190,12 @@ function AdminAnalyticsPage() {
                     <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} />
                     <YAxis stroke="#94a3b8" fontSize={11} />
                     <Tooltip
-                      contentStyle={{ backgroundColor: "#0f172a", borderColor: "#334155", borderRadius: "8px", color: "#fff" }}
+                      contentStyle={{
+                        backgroundColor: "#0f172a",
+                        borderColor: "#334155",
+                        borderRadius: "8px",
+                        color: "#fff",
+                      }}
                     />
                     <Bar dataKey="count" fill="#4f46e5" radius={[4, 4, 0, 0]} />
                   </BarChart>
@@ -200,7 +211,9 @@ function AdminAnalyticsPage() {
                 <FileText className="size-4 text-emerald-400" />
                 Document Ingestion & OCR Volume
               </h3>
-              <p className="text-xs text-slate-400">Verified documents processed over {daysFilter} days</p>
+              <p className="text-xs text-slate-400">
+                Verified documents processed over {daysFilter} days
+              </p>
             </div>
 
             <div className="h-64 w-full">
@@ -221,9 +234,20 @@ function AdminAnalyticsPage() {
                     <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} />
                     <YAxis stroke="#94a3b8" fontSize={11} />
                     <Tooltip
-                      contentStyle={{ backgroundColor: "#0f172a", borderColor: "#334155", borderRadius: "8px", color: "#fff" }}
+                      contentStyle={{
+                        backgroundColor: "#0f172a",
+                        borderColor: "#334155",
+                        borderRadius: "8px",
+                        color: "#fff",
+                      }}
                     />
-                    <Area type="monotone" dataKey="count" stroke="#10b981" fillOpacity={1} fill="url(#docVolGrad)" />
+                    <Area
+                      type="monotone"
+                      dataKey="count"
+                      stroke="#10b981"
+                      fillOpacity={1}
+                      fill="url(#docVolGrad)"
+                    />
                   </AreaChart>
                 </ResponsiveContainer>
               )}
@@ -255,7 +279,9 @@ function AdminAnalyticsPage() {
                       cx="50%"
                       cy="50%"
                       outerRadius={80}
-                      label={({ name, percent }) => `${name.split(" ")[0]} ${(percent * 100).toFixed(0)}%`}
+                      label={({ name, percent }) =>
+                        `${name.split(" ")[0]} ${(percent * 100).toFixed(0)}%`
+                      }
                       labelLine={false}
                     >
                       {(tasksQuery.data || []).map((entry, index) => (
@@ -263,7 +289,12 @@ function AdminAnalyticsPage() {
                       ))}
                     </Pie>
                     <Tooltip
-                      contentStyle={{ backgroundColor: "#0f172a", borderColor: "#334155", borderRadius: "8px", color: "#fff" }}
+                      contentStyle={{
+                        backgroundColor: "#0f172a",
+                        borderColor: "#334155",
+                        borderRadius: "8px",
+                        color: "#fff",
+                      }}
                     />
                   </PieChart>
                 </ResponsiveContainer>
@@ -278,7 +309,9 @@ function AdminAnalyticsPage() {
                 <CheckCircle2 className="size-4 text-cyan-400" />
                 Application Sanction & Approval Rate (%)
               </h3>
-              <p className="text-xs text-slate-400">Percentage of submitted applications reaching approval</p>
+              <p className="text-xs text-slate-400">
+                Percentage of submitted applications reaching approval
+              </p>
             </div>
 
             <div className="h-64 w-full">
@@ -293,7 +326,12 @@ function AdminAnalyticsPage() {
                     <XAxis dataKey="name" stroke="#94a3b8" fontSize={11} />
                     <YAxis stroke="#94a3b8" fontSize={11} domain={[0, 100]} />
                     <Tooltip
-                      contentStyle={{ backgroundColor: "#0f172a", borderColor: "#334155", borderRadius: "8px", color: "#fff" }}
+                      contentStyle={{
+                        backgroundColor: "#0f172a",
+                        borderColor: "#334155",
+                        borderRadius: "8px",
+                        color: "#fff",
+                      }}
                       formatter={(val: any) => [`${val}%`, "Approval Rate"]}
                     />
                     <Bar dataKey="rate" fill="#06b6d4" radius={[4, 4, 0, 0]} />

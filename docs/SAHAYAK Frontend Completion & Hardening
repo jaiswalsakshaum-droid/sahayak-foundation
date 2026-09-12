@@ -1,7 +1,7 @@
 # SAHAYAK — Frontend Completion & Hardening — Master Implementation Prompt
 
 > Paste this entire document as one instruction to your coding agent (Claude Code, Cursor,
-> Lovable, etc.) working inside the `jaiswalsakshaum-droid-sahayak-foundation` repo. It is
+> Antigravity, etc.) working inside the `jaiswalsakshaum-droid-sahayak-foundation` repo. It is
 > written to be self-contained: it describes the current state of the codebase, the exact
 > gaps, and the exact acceptance criteria for each fix — so the agent does not need to
 > re-discover context and cannot "guess" its way into breaking the working backend.
@@ -503,15 +503,14 @@ continues to work exactly as before.
    check `src/lib/error-page.ts` and `src/lib/error-capture.ts`, which already exist but
    audit whether they're actually wired into `router.tsx`'s route tree; if not, wire them)
    so an unhandled exception in any route renders a friendly, localized error page instead
-   of a blank screen or raw stack trace, while still forwarding the error to
-   `lovable-error-reporting.ts`'s existing reporting hook.
+   of a blank screen or raw stack trace.
 3. For the Realtime hook (`use-agent-run.ts`), add reconnect/backoff handling: if the
    Supabase Realtime WebSocket disconnects mid-run, show a "reconnecting..." indicator
    instead of leaving the UI stuck on the last received event with no explanation.
 4. Replace bare `console.warn("[Sahayak ...] ...")` calls in production code paths that
    represent *user-impacting* failures (not all `console.warn`s need to change — dev-only
-   diagnostic ones are fine) with a call to the existing `error-capture.ts`/
-   `lovable-error-reporting.ts` reporting hook **and** a user-visible signal (toast/banner)
+   diagnostic ones are fine) with a call to the existing `error-capture.ts`
+   reporting hook **and** a user-visible signal (toast/banner)
    as appropriate to that call site.
 
 **Acceptance criteria:** simulate a Supabase outage (wrong URL in `.env` temporarily, or

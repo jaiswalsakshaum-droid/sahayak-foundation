@@ -46,7 +46,14 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { requireAuth, getCurrentProfile, type UserProfile } from "@/lib/auth";
@@ -106,12 +113,16 @@ export function AssistantPage() {
 
   // Editable Draft state
   const [isEditingDraft, setIsEditingDraft] = useState(false);
-  const [editableApplicantInfo, setEditableApplicantInfo] = useState<Record<string, { value: string; status: string }>>({});
+  const [editableApplicantInfo, setEditableApplicantInfo] = useState<
+    Record<string, { value: string; status: string }>
+  >({});
   const [isSavingDraft, setIsSavingDraft] = useState(false);
 
   // Follow-up Q&A chat state
   const [followUpInput, setFollowUpInput] = useState("");
-  const [followUpMessages, setFollowUpMessages] = useState<Array<{ sender: "user" | "ai"; text: string }>>([]);
+  const [followUpMessages, setFollowUpMessages] = useState<
+    Array<{ sender: "user" | "ai"; text: string }>
+  >([]);
   const [isAskingFollowUp, setIsAskingFollowUp] = useState(false);
 
   // Direct Submission state
@@ -129,13 +140,15 @@ export function AssistantPage() {
 
   // Past Runs / History state
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
-  const [pastRuns, setPastRuns] = useState<Array<{
-    id: string;
-    query: string;
-    status: string;
-    started_at: string;
-    scheme_name?: string;
-  }>>([]);
+  const [pastRuns, setPastRuns] = useState<
+    Array<{
+      id: string;
+      query: string;
+      status: string;
+      started_at: string;
+      scheme_name?: string;
+    }>
+  >([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   // Missing document inline upload state
@@ -315,7 +328,7 @@ export function AssistantPage() {
             initialInfo[k] = { value: String(v ?? ""), status: "verified" };
           }
         });
-        setEditableApplicantInfo((prev) => Object.keys(prev).length === 0 ? initialInfo : prev);
+        setEditableApplicantInfo((prev) => (Object.keys(prev).length === 0 ? initialInfo : prev));
       }
     }
 
@@ -394,14 +407,26 @@ export function AssistantPage() {
 
     try {
       const schemeContext = {
-        scheme_name: candidateSchemes[0]?.name || applicationDraft?.ai_summary?.scheme_name || "Government Welfare Scheme",
-        benefit: candidateSchemes[0]?.benefit || applicationDraft?.ai_summary?.benefit_summary || "",
+        scheme_name:
+          candidateSchemes[0]?.name ||
+          applicationDraft?.ai_summary?.scheme_name ||
+          "Government Welfare Scheme",
+        benefit:
+          candidateSchemes[0]?.benefit || applicationDraft?.ai_summary?.benefit_summary || "",
         missing_documents: missingDocsList,
       };
-      const answer = await askAgentFollowUp(runId || "", profile?.id || "", queryToSend, schemeContext);
+      const answer = await askAgentFollowUp(
+        runId || "",
+        profile?.id || "",
+        queryToSend,
+        schemeContext,
+      );
       setFollowUpMessages((prev) => [...prev, { sender: "ai", text: answer }]);
     } catch (err) {
-      setFollowUpMessages((prev) => [...prev, { sender: "ai", text: "You can review and submit your application with the button below." }]);
+      setFollowUpMessages((prev) => [
+        ...prev,
+        { sender: "ai", text: "You can review and submit your application with the button below." },
+      ]);
     } finally {
       setIsAskingFollowUp(false);
     }
@@ -409,20 +434,28 @@ export function AssistantPage() {
 
   const handleSubmitDirectly = async () => {
     if (!directConsent) {
-      toast.error(t("assistant.consentRequired", "Please check the consent authorization box before submitting."));
+      toast.error(
+        t(
+          "assistant.consentRequired",
+          "Please check the consent authorization box before submitting.",
+        ),
+      );
       return;
     }
     if (!applicationDraft?.id) return;
 
     setIsSubmittingDirect(true);
     try {
-      const targetScheme = candidateSchemes[0]?.name || applicationDraft?.ai_summary?.scheme_name || "Welfare Scheme";
+      const targetScheme =
+        candidateSchemes[0]?.name || applicationDraft?.ai_summary?.scheme_name || "Welfare Scheme";
       const res = await submitApplicationDraft(
         applicationDraft.id,
         profile?.id || "",
         true,
         applicationDraft.scheme_id || candidateSchemes[0]?.id,
-        Object.keys(editableApplicantInfo).length > 0 ? editableApplicantInfo : applicationDraft.applicant_info
+        Object.keys(editableApplicantInfo).length > 0
+          ? editableApplicantInfo
+          : applicationDraft.applicant_info,
       );
       if (res.success) {
         setSubmissionReceipt({
@@ -556,7 +589,7 @@ export function AssistantPage() {
     setUploadExtractionStep(
       forceComplete
         ? "Proceeding with available documents and generating application draft..."
-        : "Re-evaluating civic eligibility criteria with verified records..."
+        : "Re-evaluating civic eligibility criteria with verified records...",
     );
 
     if (forceComplete) {
@@ -600,7 +633,9 @@ export function AssistantPage() {
       const uploadRes = await validateDocument(file, docType);
       if (uploadRes.success) {
         setUploadSuccessDoc(docType);
-        setUploadExtractionStep(`Vision AI (Gemini 3.6 Flash) parsing ${docType}... Re-evaluating rules.`);
+        setUploadExtractionStep(
+          `Vision AI (Gemini 3.6 Flash) parsing ${docType}... Re-evaluating rules.`,
+        );
 
         // Trigger resume after short delay to let backend extraction complete
         setTimeout(() => {
@@ -721,28 +756,31 @@ export function AssistantPage() {
                   pastRuns.map((r) => {
                     const isCurrent = runId === r.id;
                     const isDone = r.status === "COMPLETED";
-                    const isAction = r.status === "ACTION REQUIRED" || r.status === "ACTION_REQUIRED";
+                    const isAction =
+                      r.status === "ACTION REQUIRED" || r.status === "ACTION_REQUIRED";
                     const isProc = r.status === "PROCESSING" || r.status === "RUNNING";
 
                     return (
                       <button
                         key={r.id}
                         onClick={() => handleViewPastRun(r)}
-                        className={`w-full text-left p-2.5 rounded-xl border transition-all flex flex-col gap-1.5 group ${isCurrent
-                          ? "border-brand bg-brand/5 shadow-xs ring-1 ring-brand/30"
-                          : "border-line bg-card hover:border-brand/40 hover:bg-ice/50"
-                          }`}
+                        className={`w-full text-left p-2.5 rounded-xl border transition-all flex flex-col gap-1.5 group ${
+                          isCurrent
+                            ? "border-brand bg-brand/5 shadow-xs ring-1 ring-brand/30"
+                            : "border-line bg-card hover:border-brand/40 hover:bg-ice/50"
+                        }`}
                       >
                         <div className="flex items-center justify-between gap-1.5">
                           <span
-                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${isDone
-                              ? "bg-sage/15 text-sage"
-                              : isAction
-                                ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-                                : isProc
-                                  ? "bg-brand/15 text-brand"
-                                  : "bg-muted text-muted-foreground"
-                              }`}
+                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                              isDone
+                                ? "bg-sage/15 text-sage"
+                                : isAction
+                                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                                  : isProc
+                                    ? "bg-brand/15 text-brand"
+                                    : "bg-muted text-muted-foreground"
+                            }`}
                           >
                             {isDone
                               ? "Draft Ready"
@@ -753,16 +791,28 @@ export function AssistantPage() {
                                   : r.status}
                           </span>
                           <span className="text-[10px] text-muted-foreground">
-                            {new Date(r.started_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                            {new Date(r.started_at).toLocaleDateString(undefined, {
+                              month: "short",
+                              day: "numeric",
+                            })}
                           </span>
                         </div>
-                        <p className={`text-xs line-clamp-2 leading-relaxed font-medium transition-colors ${isCurrent ? "text-brand font-semibold" : "text-foreground group-hover:text-brand"
-                          }`}>
+                        <p
+                          className={`text-xs line-clamp-2 leading-relaxed font-medium transition-colors ${
+                            isCurrent
+                              ? "text-brand font-semibold"
+                              : "text-foreground group-hover:text-brand"
+                          }`}
+                        >
                           "{r.query}"
                         </p>
                         <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-line/40">
-                          <span className="truncate max-w-[140px]">{r.scheme_name || "Civic Evaluation"}</span>
-                          <span className="text-brand opacity-0 group-hover:opacity-100 transition-opacity">Open →</span>
+                          <span className="truncate max-w-[140px]">
+                            {r.scheme_name || "Civic Evaluation"}
+                          </span>
+                          <span className="text-brand opacity-0 group-hover:opacity-100 transition-opacity">
+                            Open →
+                          </span>
                         </div>
                       </button>
                     );
@@ -773,7 +823,9 @@ export function AssistantPage() {
               {/* AI Workforce Footer Pill in Sidebar */}
               <div className="p-2.5 rounded-xl bg-mist/30 border border-line text-[11px] text-muted-foreground flex items-center gap-2 mt-auto">
                 <Sparkles className="size-3.5 text-brand shrink-0" />
-                <span className="line-clamp-2">6 autonomous AI agents assist with rules, docs & drafting.</span>
+                <span className="line-clamp-2">
+                  6 autonomous AI agents assist with rules, docs & drafting.
+                </span>
               </div>
             </aside>
           ) : (
@@ -883,7 +935,9 @@ export function AssistantPage() {
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5">
                           Your Need Query
                         </p>
-                        <p className="text-xs font-medium text-foreground line-clamp-2">"{activeQuery || input}"</p>
+                        <p className="text-xs font-medium text-foreground line-clamp-2">
+                          "{activeQuery || input}"
+                        </p>
                       </div>
                       <Button
                         variant="ghost"
@@ -970,19 +1024,22 @@ export function AssistantPage() {
                         <div className="relative pl-6 border-l-2 border-line space-y-6 py-2 ml-3">
                           {journeySteps.map((step, index) => {
                             const isCurrent = index === activeStepIndex && status === "PROCESSING";
-                            const isPast = (index < activeStepIndex && activeStepIndex !== -1) || (status === "COMPLETED" && (step.messages.length > 0 || index <= 4));
+                            const isPast =
+                              (index < activeStepIndex && activeStepIndex !== -1) ||
+                              (status === "COMPLETED" && (step.messages.length > 0 || index <= 4));
                             const isUpcoming = !isCurrent && !isPast;
                             const isExpanded = expandedSteps[step.agentId] ?? true;
 
                             return (
                               <div key={step.id} className="relative transition-all duration-200">
                                 <span
-                                  className={`absolute -left-[37px] grid size-7 place-items-center rounded-full border-2 transition-all ${isCurrent
-                                    ? "bg-brand border-brand text-primary-foreground animate-pulse shadow-[0_0_12px_rgba(37,99,235,0.4)]"
-                                    : isPast
-                                      ? "bg-sage border-sage text-primary-foreground"
-                                      : "bg-card border-line/60 text-muted-foreground/50"
-                                    }`}
+                                  className={`absolute -left-[37px] grid size-7 place-items-center rounded-full border-2 transition-all ${
+                                    isCurrent
+                                      ? "bg-brand border-brand text-primary-foreground animate-pulse shadow-[0_0_12px_rgba(37,99,235,0.4)]"
+                                      : isPast
+                                        ? "bg-sage border-sage text-primary-foreground"
+                                        : "bg-card border-line/60 text-muted-foreground/50"
+                                  }`}
                                 >
                                   <step.icon className="size-3.5" />
                                 </span>
@@ -994,12 +1051,13 @@ export function AssistantPage() {
                                   >
                                     <div className="flex items-center gap-2">
                                       <h3
-                                        className={`font-medium text-xs flex items-center gap-1.5 ${isCurrent
-                                          ? "text-brand font-semibold"
-                                          : isPast
-                                            ? "text-foreground"
-                                            : "text-muted-foreground/60"
-                                          }`}
+                                        className={`font-medium text-xs flex items-center gap-1.5 ${
+                                          isCurrent
+                                            ? "text-brand font-semibold"
+                                            : isPast
+                                              ? "text-foreground"
+                                              : "text-muted-foreground/60"
+                                        }`}
                                       >
                                         {step.name}
                                       </h3>
@@ -1028,14 +1086,18 @@ export function AssistantPage() {
                                   {isExpanded && step.messages.length > 0 && (
                                     <div className="mt-2 space-y-2">
                                       {step.messages.map((msg, i) => {
-                                        const isWarning = msg.startsWith("⚠️") || msg.toLowerCase().includes("notice") || msg.toLowerCase().includes("issue");
+                                        const isWarning =
+                                          msg.startsWith("⚠️") ||
+                                          msg.toLowerCase().includes("notice") ||
+                                          msg.toLowerCase().includes("issue");
                                         return (
                                           <div
                                             key={i}
-                                            className={`text-xs rounded-md p-2.5 border leading-relaxed ${isWarning
-                                              ? "bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200 font-medium"
-                                              : "bg-ice-2/60 border-line text-muted-foreground"
-                                              }`}
+                                            className={`text-xs rounded-md p-2.5 border leading-relaxed ${
+                                              isWarning
+                                                ? "bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200 font-medium"
+                                                : "bg-ice-2/60 border-line text-muted-foreground"
+                                            }`}
                                           >
                                             {msg}
                                           </div>
@@ -1054,7 +1116,9 @@ export function AssistantPage() {
                                       {step.agentId === "citizen" && step.details?.intent && (
                                         <div className="p-2.5 rounded-lg bg-brand/5 border border-brand/15 text-xs space-y-1.5">
                                           <div className="flex items-center gap-2">
-                                            <span className="font-semibold text-brand">Category:</span>
+                                            <span className="font-semibold text-brand">
+                                              Category:
+                                            </span>
                                             <span className="px-2 py-0.5 rounded bg-brand/10 text-brand font-medium">
                                               {step.details.intent.category}
                                             </span>
@@ -1093,10 +1157,11 @@ export function AssistantPage() {
                                                         {crit.criterion_name || crit.name}
                                                       </span>
                                                       <span
-                                                        className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${crit.status === "verified"
-                                                          ? "bg-sage/15 text-sage"
-                                                          : "bg-coral/15 text-coral"
-                                                          }`}
+                                                        className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                                                          crit.status === "verified"
+                                                            ? "bg-sage/15 text-sage"
+                                                            : "bg-coral/15 text-coral"
+                                                        }`}
                                                       >
                                                         {crit.status}
                                                       </span>
@@ -1109,29 +1174,53 @@ export function AssistantPage() {
                                                       className="text-[10px] text-brand flex items-center gap-1 hover:underline pt-0.5"
                                                     >
                                                       <Eye className="size-2.5" />
-                                                      {isShowingEv ? "Hide Evidence" : "Show Evidence"}
+                                                      {isShowingEv
+                                                        ? "Hide Evidence"
+                                                        : "Show Evidence"}
                                                     </button>
                                                     {isShowingEv && (
                                                       <div className="mt-1 p-2 rounded bg-card text-[11px] text-muted-foreground border border-line">
                                                         <p>
                                                           <strong>Requirement:</strong>{" "}
-                                                          {typeof crit.requirement === "object" && crit.requirement !== null
+                                                          {typeof crit.requirement === "object" &&
+                                                          crit.requirement !== null
                                                             ? JSON.stringify(crit.requirement)
                                                             : String(crit.requirement ?? "—")}
                                                         </p>
                                                         <p>
                                                           <strong>Citizen Data:</strong>{" "}
-                                                          {typeof (crit.citizen_info ?? crit.citizenInfo) === "object" &&
-                                                            (crit.citizen_info ?? crit.citizenInfo) !== null
-                                                            ? JSON.stringify(crit.citizen_info ?? crit.citizenInfo)
-                                                            : String(crit.citizen_info ?? crit.citizenInfo ?? "—")}
+                                                          {typeof (
+                                                            crit.citizen_info ?? crit.citizenInfo
+                                                          ) === "object" &&
+                                                          (crit.citizen_info ??
+                                                            crit.citizenInfo) !== null
+                                                            ? JSON.stringify(
+                                                                crit.citizen_info ??
+                                                                  crit.citizenInfo,
+                                                              )
+                                                            : String(
+                                                                crit.citizen_info ??
+                                                                  crit.citizenInfo ??
+                                                                  "—",
+                                                              )}
                                                         </p>
                                                         <p>
                                                           <strong>Source:</strong>{" "}
-                                                          {typeof (crit.evidence_source ?? crit.evidenceSource) === "object" &&
-                                                            (crit.evidence_source ?? crit.evidenceSource) !== null
-                                                            ? JSON.stringify(crit.evidence_source ?? crit.evidenceSource)
-                                                            : String(crit.evidence_source ?? crit.evidenceSource ?? "—")}
+                                                          {typeof (
+                                                            crit.evidence_source ??
+                                                            crit.evidenceSource
+                                                          ) === "object" &&
+                                                          (crit.evidence_source ??
+                                                            crit.evidenceSource) !== null
+                                                            ? JSON.stringify(
+                                                                crit.evidence_source ??
+                                                                  crit.evidenceSource,
+                                                              )
+                                                            : String(
+                                                                crit.evidence_source ??
+                                                                  crit.evidenceSource ??
+                                                                  "—",
+                                                              )}
                                                         </p>
                                                       </div>
                                                     )}
@@ -1157,7 +1246,9 @@ export function AssistantPage() {
                                                     key={dIdx}
                                                     className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-200 text-[11px] font-medium"
                                                   >
-                                                    {typeof doc === "object" && doc !== null ? JSON.stringify(doc) : String(doc)}
+                                                    {typeof doc === "object" && doc !== null
+                                                      ? JSON.stringify(doc)
+                                                      : String(doc)}
                                                   </span>
                                                 ),
                                               )}
@@ -1204,7 +1295,9 @@ export function AssistantPage() {
                         </div>
                         <div className="min-w-0">
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-semibold text-foreground">Workforce Orchestration</span>
+                            <span className="text-xs font-semibold text-foreground">
+                              Workforce Orchestration
+                            </span>
                             {status === "PROCESSING" && (
                               <span className="inline-flex items-center gap-1 text-[10px] text-brand bg-brand/10 px-2 py-0.5 rounded-full font-medium">
                                 <Loader2 className="size-2.5 animate-spin" /> Live Processing
@@ -1248,10 +1341,14 @@ export function AssistantPage() {
                             <CheckCircle2 className="size-3.5" /> Application Draft Ready
                           </span>
                           <h2 className="text-2xl font-bold font-display mt-2 text-foreground">
-                            {candidateSchemes[0]?.name || applicationDraft?.ai_summary?.scheme_name || "Government Scheme Benefit"}
+                            {candidateSchemes[0]?.name ||
+                              applicationDraft?.ai_summary?.scheme_name ||
+                              "Government Scheme Benefit"}
                           </h2>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            {candidateSchemes[0]?.benefit || applicationDraft?.ai_summary?.benefit_summary || "Official Government Support"}
+                            {candidateSchemes[0]?.benefit ||
+                              applicationDraft?.ai_summary?.benefit_summary ||
+                              "Official Government Support"}
                           </p>
                         </div>
                         <div className="text-right">
@@ -1276,19 +1373,25 @@ export function AssistantPage() {
                         </p>
                         <div className="grid sm:grid-cols-3 gap-2 pt-1">
                           <div className="p-2 rounded bg-card border border-line text-xs">
-                            <span className="text-[10px] text-muted-foreground block">Verified Fields</span>
+                            <span className="text-[10px] text-muted-foreground block">
+                              Verified Fields
+                            </span>
                             <span className="font-semibold text-sage">
                               {applicationDraft.ai_summary?.verified_count ?? 4} Attributes Verified
                             </span>
                           </div>
                           <div className="p-2 rounded bg-card border border-line text-xs">
-                            <span className="text-[10px] text-muted-foreground block">Flagged for Review</span>
+                            <span className="text-[10px] text-muted-foreground block">
+                              Flagged for Review
+                            </span>
                             <span className="font-semibold text-amber-600">
                               {applicationDraft.ai_summary?.review_count ?? 2} Pending Review
                             </span>
                           </div>
                           <div className="p-2 rounded bg-card border border-line text-xs">
-                            <span className="text-[10px] text-muted-foreground block">Review Timeline</span>
+                            <span className="text-[10px] text-muted-foreground block">
+                              Review Timeline
+                            </span>
                             <span className="font-semibold text-brand">3–5 Business Days</span>
                           </div>
                         </div>
@@ -1318,7 +1421,11 @@ export function AssistantPage() {
                                   disabled={isSavingDraft}
                                   onClick={handleSaveDraftEdits}
                                 >
-                                  {isSavingDraft ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
+                                  {isSavingDraft ? (
+                                    <Loader2 className="size-3 animate-spin" />
+                                  ) : (
+                                    <Save className="size-3" />
+                                  )}
                                   Save Changes
                                 </Button>
                               </>
@@ -1340,14 +1447,16 @@ export function AssistantPage() {
                           {Object.entries(
                             isEditingDraft
                               ? editableApplicantInfo
-                              : applicationDraft.applicant_info || editableApplicantInfo || {}
+                              : applicationDraft.applicant_info || editableApplicantInfo || {},
                           ).map(([field, rawVal]: [string, any]) => {
                             let displayStr = "—";
                             let statusBadge = "needs_review";
 
                             if (rawVal !== null && typeof rawVal === "object") {
                               displayStr =
-                                rawVal.value !== undefined && rawVal.value !== null && rawVal.value !== ""
+                                rawVal.value !== undefined &&
+                                rawVal.value !== null &&
+                                rawVal.value !== ""
                                   ? String(rawVal.value)
                                   : "—";
                               statusBadge = rawVal.status || "needs_review";
@@ -1359,20 +1468,22 @@ export function AssistantPage() {
                             return (
                               <div
                                 key={field}
-                                className={`p-3 rounded-lg border transition-all ${isEditingDraft
-                                  ? "bg-card border-brand/40 shadow-sm"
-                                  : "bg-ice-2/40 border-line"
-                                  } flex flex-col justify-between gap-2`}
+                                className={`p-3 rounded-lg border transition-all ${
+                                  isEditingDraft
+                                    ? "bg-card border-brand/40 shadow-sm"
+                                    : "bg-ice-2/40 border-line"
+                                } flex flex-col justify-between gap-2`}
                               >
                                 <div className="flex items-center justify-between">
                                   <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
                                     {field}
                                   </span>
                                   <span
-                                    className={`px-2 py-0.5 rounded text-[10px] font-semibold ${statusBadge === "verified"
-                                      ? "bg-sage/15 text-sage"
-                                      : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-                                      }`}
+                                    className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                      statusBadge === "verified"
+                                        ? "bg-sage/15 text-sage"
+                                        : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                                    }`}
                                   >
                                     {statusBadge === "verified" ? "Verified" : "Review"}
                                   </span>
@@ -1380,7 +1491,10 @@ export function AssistantPage() {
 
                                 {isEditingDraft ? (
                                   <Input
-                                    value={editableApplicantInfo[field]?.value ?? (displayStr === "—" ? "" : displayStr)}
+                                    value={
+                                      editableApplicantInfo[field]?.value ??
+                                      (displayStr === "—" ? "" : displayStr)
+                                    }
                                     onChange={(e) => handleFieldChange(field, e.target.value)}
                                     placeholder={`Enter ${field}`}
                                     className="h-8 text-xs bg-card"
@@ -1432,10 +1546,11 @@ export function AssistantPage() {
                             {followUpMessages.map((m, mIdx) => (
                               <div
                                 key={mIdx}
-                                className={`p-2 rounded text-xs leading-relaxed ${m.sender === "user"
-                                  ? "bg-brand/10 text-brand font-medium ml-4"
-                                  : "bg-ice-2 text-foreground mr-4 border border-line"
-                                  }`}
+                                className={`p-2 rounded text-xs leading-relaxed ${
+                                  m.sender === "user"
+                                    ? "bg-brand/10 text-brand font-medium ml-4"
+                                    : "bg-ice-2 text-foreground mr-4 border border-line"
+                                }`}
                               >
                                 <span className="font-semibold text-[10px] uppercase block text-muted-foreground mb-0.5">
                                   {m.sender === "user" ? "You" : "Sahayak AI"}
@@ -1466,7 +1581,11 @@ export function AssistantPage() {
                             onClick={() => handleSendFollowUp()}
                             disabled={isAskingFollowUp || !followUpInput.trim()}
                           >
-                            {isAskingFollowUp ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
+                            {isAskingFollowUp ? (
+                              <Loader2 className="size-3.5 animate-spin" />
+                            ) : (
+                              <Send className="size-3.5" />
+                            )}
                           </Button>
                         </div>
                       </div>
@@ -1481,7 +1600,9 @@ export function AssistantPage() {
                             className="mt-0.5 rounded border-line text-brand focus:ring-brand"
                           />
                           <span className="text-xs text-foreground leading-relaxed">
-                            I verify that the applicant details above are accurate and grant permission to Sahayak AI to submit this application to the department on my behalf.
+                            I verify that the applicant details above are accurate and grant
+                            permission to Sahayak AI to submit this application to the department on
+                            my behalf.
                           </span>
                         </label>
 
@@ -1525,7 +1646,8 @@ export function AssistantPage() {
                         </div>
                       </div>
                     </div>
-                  ) : (status === "ACTION_REQUIRED" || missingDocsList.length > 0) && status !== "COMPLETED" ? (
+                  ) : (status === "ACTION_REQUIRED" || missingDocsList.length > 0) &&
+                    status !== "COMPLETED" ? (
                     /* 2. ACTION_REQUIRED: Multi-Document Inline Uploader & Auto-Resume Trigger (Phase C) */
                     <div className="rounded-xl border border-amber-500/40 bg-card p-6 shadow-sm space-y-6 animate-in fade-in duration-300">
                       <div className="flex items-start gap-3">
@@ -1542,7 +1664,9 @@ export function AssistantPage() {
                             </span>
                           </div>
                           <p className="text-xs text-muted-foreground mt-1">
-                            Document Agent paused the workflow. Upload any of the {missingDocsList.length} required document(s) below to automatically extract data, re-evaluate eligibility, and resume application drafting.
+                            Document Agent paused the workflow. Upload any of the{" "}
+                            {missingDocsList.length} required document(s) below to automatically
+                            extract data, re-evaluate eligibility, and resume application drafting.
                           </p>
                         </div>
                       </div>
@@ -1563,21 +1687,30 @@ export function AssistantPage() {
                         </h3>
                         <div className="grid grid-cols-1 gap-2.5">
                           {missingDocsList.map((docName, idx) => {
-                            const isThisUploading = isUploadingMissingDoc && selectedUploadDocType === docName;
+                            const isThisUploading =
+                              isUploadingMissingDoc && selectedUploadDocType === docName;
                             const isUploaded = uploadSuccessDoc === docName;
 
                             return (
                               <div
                                 key={idx}
-                                className={`p-4 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${isUploaded
-                                  ? "border-sage/50 bg-sage/5"
-                                  : "border-line bg-ice-2/30 hover:border-brand/40"
-                                  }`}
+                                className={`p-4 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                  isUploaded
+                                    ? "border-sage/50 bg-sage/5"
+                                    : "border-line bg-ice-2/30 hover:border-brand/40"
+                                }`}
                               >
                                 <div className="flex items-center gap-3">
-                                  <div className={`grid size-9 place-items-center rounded-lg ${isUploaded ? "bg-sage/15 text-sage" : "bg-brand/10 text-brand"
-                                    }`}>
-                                    {isUploaded ? <Check className="size-4" /> : <FileText className="size-4" />}
+                                  <div
+                                    className={`grid size-9 place-items-center rounded-lg ${
+                                      isUploaded ? "bg-sage/15 text-sage" : "bg-brand/10 text-brand"
+                                    }`}
+                                  >
+                                    {isUploaded ? (
+                                      <Check className="size-4" />
+                                    ) : (
+                                      <FileText className="size-4" />
+                                    )}
                                   </div>
                                   <div>
                                     <div className="flex items-center gap-2">
@@ -1601,10 +1734,11 @@ export function AssistantPage() {
                                   variant={isUploaded ? "outline" : "default"}
                                   disabled={isUploadingMissingDoc}
                                   onClick={() => triggerUploadForDoc(docName)}
-                                  className={`shrink-0 gap-1.5 ${isUploaded
-                                    ? "border-sage/40 text-sage hover:bg-sage/10"
-                                    : "bg-brand hover:bg-brand/90"
-                                    }`}
+                                  className={`shrink-0 gap-1.5 ${
+                                    isUploaded
+                                      ? "border-sage/40 text-sage hover:bg-sage/10"
+                                      : "bg-brand hover:bg-brand/90"
+                                  }`}
                                 >
                                   {isThisUploading ? (
                                     <>
@@ -1643,7 +1777,9 @@ export function AssistantPage() {
                           onClick={() => handleResumeWorkflow(false)}
                           className="gap-1.5"
                         >
-                          <RefreshCw className={`size-3.5 ${isUploadingMissingDoc ? "animate-spin" : ""}`} />
+                          <RefreshCw
+                            className={`size-3.5 ${isUploadingMissingDoc ? "animate-spin" : ""}`}
+                          />
                           Re-Check & Resume
                         </Button>
 
@@ -1664,7 +1800,10 @@ export function AssistantPage() {
                       </div>
 
                       {/* Confirmation Dialog: Proceed with Incomplete Documents */}
-                      <Dialog open={showMissingDocsConfirmDialog} onOpenChange={setShowMissingDocsConfirmDialog}>
+                      <Dialog
+                        open={showMissingDocsConfirmDialog}
+                        onOpenChange={setShowMissingDocsConfirmDialog}
+                      >
                         <DialogContent className="sm:max-w-md">
                           <DialogHeader>
                             <DialogTitle className="flex items-center gap-2 text-amber-600 text-base">
@@ -1674,9 +1813,7 @@ export function AssistantPage() {
                           </DialogHeader>
 
                           <div className="space-y-3 py-2 text-xs text-muted-foreground">
-                            <p>
-                              The following mandatory document(s) have not been uploaded yet:
-                            </p>
+                            <p>The following mandatory document(s) have not been uploaded yet:</p>
                             <div className="flex flex-wrap gap-1.5">
                               {missingDocsList.map((doc, i) => (
                                 <span
@@ -1688,7 +1825,9 @@ export function AssistantPage() {
                               ))}
                             </div>
                             <p className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300">
-                              If you continue without uploading these documents, your application draft will be generated with <strong>"Review Required"</strong> flags for missing proof and will require manual departmental review.
+                              If you continue without uploading these documents, your application
+                              draft will be generated with <strong>"Review Required"</strong> flags
+                              for missing proof and will require manual departmental review.
                             </p>
                           </div>
 
@@ -1736,9 +1875,13 @@ export function AssistantPage() {
                                 </span>
                                 <h3 className="font-semibold text-lg flex items-center gap-2 mt-0.5">
                                   {scheme.name}
-                                  {scheme.official && <CheckCircle2 className="size-4 text-brand" />}
+                                  {scheme.official && (
+                                    <CheckCircle2 className="size-4 text-brand" />
+                                  )}
                                 </h3>
-                                <p className="text-brand font-medium text-sm mt-1">{scheme.benefit}</p>
+                                <p className="text-brand font-medium text-sm mt-1">
+                                  {scheme.benefit}
+                                </p>
                               </div>
                               <div className="text-right">
                                 <div className="text-xl font-bold font-display text-sage">
@@ -1873,8 +2016,12 @@ export function AssistantPage() {
                               className={crit.status === "missing" ? "bg-amber-500/5" : ""}
                             >
                               <td className="px-3 py-3 font-medium text-foreground">{crit.name}</td>
-                              <td className="px-3 py-3 text-muted-foreground">{crit.citizenInfo}</td>
-                              <td className="px-3 py-3 text-muted-foreground">{crit.requirement}</td>
+                              <td className="px-3 py-3 text-muted-foreground">
+                                {crit.citizenInfo}
+                              </td>
+                              <td className="px-3 py-3 text-muted-foreground">
+                                {crit.requirement}
+                              </td>
                               <td className="px-3 py-3 text-center">
                                 {crit.status === "verified" ? (
                                   <CheckCircle2 className="size-4 text-sage inline" />
@@ -1923,7 +2070,8 @@ export function AssistantPage() {
                     Application Submitted Successfully!
                   </DialogTitle>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Your application has been logged on the department portal and handed off to the Tracker Agent.
+                    Your application has been logged on the department portal and handed off to the
+                    Tracker Agent.
                   </p>
                 </div>
 
@@ -1931,7 +2079,9 @@ export function AssistantPage() {
                   <div className="flex justify-between items-center pb-2 border-b border-line">
                     <span className="text-muted-foreground">Tracking ID</span>
                     <div className="flex items-center gap-1.5">
-                      <span className="font-mono font-bold text-brand">{submissionReceipt.trackingId}</span>
+                      <span className="font-mono font-bold text-brand">
+                        {submissionReceipt.trackingId}
+                      </span>
                       <button
                         onClick={() => {
                           navigator.clipboard.writeText(submissionReceipt.trackingId);
@@ -1945,13 +2095,18 @@ export function AssistantPage() {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">Scheme</span>
-                    <span className="font-medium text-foreground">{submissionReceipt.schemeName}</span>
+                    <span className="font-medium text-foreground">
+                      {submissionReceipt.schemeName}
+                    </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-muted-foreground">Submitted At</span>
                     <span className="font-medium text-foreground">
                       {new Date(submissionReceipt.submittedAt).toLocaleDateString()} at{" "}
-                      {new Date(submissionReceipt.submittedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      {new Date(submissionReceipt.submittedAt).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
@@ -1991,7 +2146,9 @@ export function AssistantPage() {
             <DialogHeader>
               <div className="flex items-center gap-2">
                 <History className="size-4 text-brand" />
-                <DialogTitle className="text-lg font-display">Past Inquiries & Workforce Runs</DialogTitle>
+                <DialogTitle className="text-lg font-display">
+                  Past Inquiries & Workforce Runs
+                </DialogTitle>
               </div>
               <DialogDescription className="text-xs text-muted-foreground">
                 Revisit your previous civic queries, evaluated schemes, and application progress.
@@ -2025,14 +2182,15 @@ export function AssistantPage() {
                             "{r.query}"
                           </p>
                           <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${isDone
-                              ? "bg-sage/15 text-sage"
-                              : isAction
-                                ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-                                : isProc
-                                  ? "bg-brand/15 text-brand"
-                                  : "bg-muted text-muted-foreground"
-                              }`}
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                              isDone
+                                ? "bg-sage/15 text-sage"
+                                : isAction
+                                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                                  : isProc
+                                    ? "bg-brand/15 text-brand"
+                                    : "bg-muted text-muted-foreground"
+                            }`}
                           >
                             {isDone
                               ? "Draft Ready"
@@ -2099,4 +2257,3 @@ export function AssistantPage() {
     </AppShell>
   );
 }
-

@@ -228,11 +228,7 @@ function SignupPage() {
                     <CheckCircle2 className="mr-2 size-4" /> Account created
                   </Button>
                 ) : (
-                  <Button
-                    type="submit"
-                    className="w-full"
-                    disabled={isLoading || !isFormValid}
-                  >
+                  <Button type="submit" className="w-full" disabled={isLoading || !isFormValid}>
                     {isLoading ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
                     {isLoading
                       ? t("common.loading", "Creating account...")

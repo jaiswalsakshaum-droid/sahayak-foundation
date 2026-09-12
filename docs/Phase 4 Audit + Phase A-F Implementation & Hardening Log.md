@@ -1,7 +1,9 @@
 # SAHAYAK — Full Codebase Audit, Pause/Resume Engine & UI Hardening (Phases A–F)
 
 ## Executive Summary
+
 This document provides a comprehensive audit and implementation log across the SAHAYAK stack (FastAPI/LangGraph backend, React/TanStack frontend, and Supabase Edge Functions/Postgres). It addresses the core bugs identified in the prompt:
+
 1. **The Central Bug**: Agent runs dead-ending in `ACTION REQUIRED` without ability to pause/resume upon document upload.
 2. **The Summary Screen Bug**: Completed runs failing to show the final application draft and next steps.
 3. **Mock Data Contamination**: Fake fallback citizens (`Rahul Sharma`), demo schemes masquerading as live catalog data, hardcoded applicant attributes, and incorrect Gemini model defaults.
@@ -14,6 +16,7 @@ This document provides a comprehensive audit and implementation log across the S
 ## Phase-by-Phase Changes & Verification
 
 ### Phase A: Eradicate Mock Data Masquerading as Live Data
+
 - **`backend/app.py`**:
   - Removed the fabricated citizen profile fallback (`Rahul Sharma`, OBC, Lucknow).
   - When a profile cannot be fetched or is missing, the backend immediately halts the run with status `ERROR` and writes a system audit event informing the user to complete their profile.
@@ -31,6 +34,7 @@ This document provides a comprehensive audit and implementation log across the S
 ---
 
 ### Phase B: Run Lifecycle Reliability
+
 - **`src/hooks/use-agent-run.ts`**:
   - **Removed Blind 45s Timeout**: Eliminated the hardcoded 45s timer.
   - **Connection Watchdog (12s)**: Shows `"Connecting to your AI workforce..."` if initial events are delayed without marking the run in `ERROR`.
@@ -42,6 +46,7 @@ This document provides a comprehensive audit and implementation log across the S
 ---
 
 ### Phase C: True Pause & Resume for Missing Documents
+
 - **Database Schema (`supabase/migrations/20260912000000_pending_requirements.sql`)**:
   - Added `pending_requirements jsonb` and `selected_scheme_id uuid` to `agent_runs`.
 - **State Definition (`backend/state.py`)**:
@@ -60,6 +65,7 @@ This document provides a comprehensive audit and implementation log across the S
 ---
 
 ### Phase D: Application Ready Final Summary
+
 - **`src/routes/assistant.tsx`**:
   - Listens to `latestData.application_draft` from `agent_events`.
   - When `status === "COMPLETED"`, renders an **Application Ready & Verified** summary card displaying:
@@ -71,6 +77,7 @@ This document provides a comprehensive audit and implementation log across the S
 ---
 
 ### Phase E: Perplexity-Style Research & Timeline UX
+
 - **`src/routes/assistant.tsx`**:
   - Wrapped journey timeline in a fixed-height scroll container: `h-[650px] max-h-[75vh] overflow-y-auto`.
   - Smart auto-scroll: Scrolls to bottom on new events only when the user is within 80px of bottom.
@@ -83,6 +90,7 @@ This document provides a comprehensive audit and implementation log across the S
 ---
 
 ### Phase F: Cost & Reliability Hardening
+
 - **`backend/agent_graph.py`**:
   - **Batched Text Rule Evaluation**: Implemented `evaluate_text_rules_batched()` which batches all qualitative text criteria for a scheme into a single Groq JSON call rather than 1 call per criterion.
   - **Intent Classification LRU Cache**: Added `_INTENT_CACHE` in `citizen_agent_node` to avoid duplicate LLM calls on repeated or identical queries.
@@ -95,5 +103,6 @@ This document provides a comprehensive audit and implementation log across the S
 ---
 
 ## Verification Summary
+
 - **Frontend Build**: Verified via `npm run build` — compiled cleanly with zero errors across all SSR routes.
 - **Backend Import & Compilation**: Verified via `backend/.venv/bin/python` — all modules (`app`, `agent_graph`, `document_extractor`, `state`) load with zero syntax or import errors.

@@ -23,7 +23,8 @@ export const Route = createFileRoute("/admin/login")({
       { title: "Admin Console Sign In — Sahayak" },
       {
         name: "description",
-        content: "Authorized personnel sign-in for Sahayak Civic AI Workforce and Scheme Administration.",
+        content:
+          "Authorized personnel sign-in for Sahayak Civic AI Workforce and Scheme Administration.",
       },
     ],
   }),
@@ -204,7 +205,8 @@ function AdminLoginPage() {
 
         {/* Security Warning Notice */}
         <p className="text-center text-[11px] text-slate-500 max-w-xs mx-auto leading-relaxed">
-          Unauthorized access attempts are audited and logged with IP, timestamp, and device fingerprint.
+          Unauthorized access attempts are audited and logged with IP, timestamp, and device
+          fingerprint.
         </p>
       </div>
     </div>

@@ -92,10 +92,7 @@ function ProfilePage() {
       };
 
       if (isSupabaseConfigured) {
-        const { error } = await supabase
-          .from("profiles")
-          .update(updates)
-          .eq("id", profile.id);
+        const { error } = await supabase.from("profiles").update(updates).eq("id", profile.id);
 
         if (error) throw error;
       }
@@ -151,7 +148,12 @@ function ProfilePage() {
               Manage your verified identity, ecosystem integrations, and consent preferences.
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setConsentOpen(true)} className="self-start sm:self-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setConsentOpen(true)}
+            className="self-start sm:self-auto"
+          >
             <ShieldCheck className="mr-2 size-4 text-sage" />
             Privacy & Consent
           </Button>
@@ -162,15 +164,13 @@ function ProfilePage() {
             <Loader2 className="size-6 animate-spin mr-2" /> Loading profile...
           </div>
         ) : isEditing ? (
-          <form onSubmit={handleSaveProfile} className="bg-card rounded-xl border border-line p-6 shadow-sm space-y-5">
+          <form
+            onSubmit={handleSaveProfile}
+            className="bg-card rounded-xl border border-line p-6 shadow-sm space-y-5"
+          >
             <div className="flex items-center justify-between border-b border-line pb-3">
               <h2 className="text-lg font-semibold">Edit Profile</h2>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsEditing(false)}
-              >
+              <Button type="button" variant="ghost" size="sm" onClick={() => setIsEditing(false)}>
                 <X className="size-4 mr-1" /> Cancel
               </Button>
             </div>
@@ -252,7 +252,11 @@ function ProfilePage() {
                 Cancel
               </Button>
               <Button type="submit" disabled={saving}>
-                {saving ? <Loader2 className="size-4 animate-spin mr-2" /> : <Save className="size-4 mr-2" />}
+                {saving ? (
+                  <Loader2 className="size-4 animate-spin mr-2" />
+                ) : (
+                  <Save className="size-4 mr-2" />
+                )}
                 Save Changes
               </Button>
             </div>
@@ -265,7 +269,8 @@ function ProfilePage() {
             <div className="flex-1">
               <h2 className="text-xl font-semibold">{profile?.full_name || "Citizen User"}</h2>
               <p className="text-sm text-muted-foreground mt-1">
-                {profile?.age ? `${profile.age} years old` : "Age not specified"} • {profile?.location || "Location not set"}
+                {profile?.age ? `${profile.age} years old` : "Age not specified"} •{" "}
+                {profile?.location || "Location not set"}
               </p>
               {profile?.email && (
                 <p className="text-xs text-muted-foreground mt-0.5">{profile.email}</p>
@@ -275,7 +280,10 @@ function ProfilePage() {
                   {profile?.occupation || "Occupation: Not specified"}
                 </span>
                 <span className="px-2.5 py-1 bg-ice-2 border border-line rounded-md text-xs font-medium">
-                  Income: {profile?.annual_income ? `₹${Number(profile.annual_income).toLocaleString()}` : "Not specified"}
+                  Income:{" "}
+                  {profile?.annual_income
+                    ? `₹${Number(profile.annual_income).toLocaleString()}`
+                    : "Not specified"}
                 </span>
                 {profile?.phone && (
                   <span className="px-2.5 py-1 bg-ice-2 border border-line rounded-md text-xs font-medium">
@@ -284,7 +292,12 @@ function ProfilePage() {
                 )}
               </div>
             </div>
-            <Button variant="outline" size="sm" onClick={() => setIsEditing(true)} className="shrink-0 mt-2 sm:mt-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsEditing(true)}
+              className="shrink-0 mt-2 sm:mt-0"
+            >
               <Edit2 className="size-3.5 mr-1.5" /> Edit Profile
             </Button>
           </div>
@@ -324,9 +337,17 @@ function ProfilePage() {
         <div className="rounded-xl border border-line bg-card/60 p-4 text-xs text-muted-foreground flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Lock className="size-4 text-sage" />
-            <span>Profile and identity attributes are encrypted end-to-end and shared only with verified civic schemes upon citizen consent.</span>
+            <span>
+              Profile and identity attributes are encrypted end-to-end and shared only with verified
+              civic schemes upon citizen consent.
+            </span>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => setConsentOpen(true)} className="h-7 text-xs text-brand font-medium">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setConsentOpen(true)}
+            className="h-7 text-xs text-brand font-medium"
+          >
             Manage Consent
           </Button>
         </div>

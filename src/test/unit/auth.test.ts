@@ -29,7 +29,7 @@ describe("Auth Helper Functions", () => {
 
     // Mock module state for isSupabaseConfigured
     const authModule = await import("@/lib/auth");
-    
+
     // Call signIn
     const result = await authModule.signIn("admin", "admin");
 
@@ -59,4 +59,3 @@ describe("Auth Helper Functions", () => {
     });
   });
 });
-

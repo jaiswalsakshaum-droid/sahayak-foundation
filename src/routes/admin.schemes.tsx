@@ -51,7 +51,8 @@ export const Route = createFileRoute("/admin/schemes")({
       { title: "Schemes Catalog Management — Sahayak Admin" },
       {
         name: "description",
-        content: "Manage national welfare scheme repository, update eligibility criteria, and register new government programs.",
+        content:
+          "Manage national welfare scheme repository, update eligibility criteria, and register new government programs.",
       },
     ],
   }),
@@ -84,8 +85,14 @@ function AdminSchemesPage() {
   const [newBenefit, setNewBenefit] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newSource, setNewSource] = useState("myScheme / National Portal");
-  const [newRules, setNewRules] = useState<{ criterion_name: string; requirement: string; rule_type: string }[]>([
-    { criterion_name: "Citizenship & Identification", requirement: "Valid Aadhaar card holder", rule_type: "text" },
+  const [newRules, setNewRules] = useState<
+    { criterion_name: string; requirement: string; rule_type: string }[]
+  >([
+    {
+      criterion_name: "Citizenship & Identification",
+      requirement: "Valid Aadhaar card holder",
+      rule_type: "text",
+    },
   ]);
   const [newDocs, setNewDocs] = useState<{ document_type: string; is_mandatory: boolean }[]>([
     { document_type: "Aadhaar Card", is_mandatory: true },
@@ -104,13 +111,7 @@ function AdminSchemesPage() {
 
   // Status Update Mutation
   const updateStatusMutation = useMutation({
-    mutationFn: async ({
-      id,
-      status,
-    }: {
-      id: string;
-      status: "Active" | "Draft" | "Archived";
-    }) => {
+    mutationFn: async ({ id, status }: { id: string; status: "Active" | "Draft" | "Archived" }) => {
       const res = await updateAdminSchemeStatus(id, status);
       if (!res.ok) throw new Error(res.error);
       return { id, status };
@@ -168,7 +169,13 @@ function AdminSchemesPage() {
     setNewBenefit("");
     setNewDescription("");
     setNewSource("myScheme / National Portal");
-    setNewRules([{ criterion_name: "Citizenship & Identification", requirement: "Valid Aadhaar card holder", rule_type: "text" }]);
+    setNewRules([
+      {
+        criterion_name: "Citizenship & Identification",
+        requirement: "Valid Aadhaar card holder",
+        rule_type: "text",
+      },
+    ]);
     setNewDocs([{ document_type: "Aadhaar Card", is_mandatory: true }]);
   };
 
@@ -305,8 +312,8 @@ function AdminSchemesPage() {
                         scheme.eligibility_status === "Active"
                           ? "text-emerald-300 border-emerald-800"
                           : scheme.eligibility_status === "Draft"
-                          ? "text-amber-300 border-amber-800"
-                          : "text-slate-400 border-slate-700"
+                            ? "text-amber-300 border-amber-800"
+                            : "text-slate-400 border-slate-700"
                       }`}
                     >
                       <option value="Active">Active</option>
@@ -358,7 +365,10 @@ function AdminSchemesPage() {
       </div>
 
       {/* Scheme Detail Dialog */}
-      <Dialog open={Boolean(selectedScheme)} onOpenChange={(open) => !open && setSelectedScheme(null)}>
+      <Dialog
+        open={Boolean(selectedScheme)}
+        onOpenChange={(open) => !open && setSelectedScheme(null)}
+      >
         <DialogContent className="bg-slate-900 border-slate-800 text-white max-w-xl max-h-[85vh] overflow-y-auto">
           {selectedScheme && (
             <>
@@ -474,7 +484,8 @@ function AdminSchemesPage() {
               Register New Government Scheme
             </DialogTitle>
             <DialogDescription className="text-xs text-slate-400">
-              Create an official scheme record with eligibility rules and mandatory document requirements.
+              Create an official scheme record with eligibility rules and mandatory document
+              requirements.
             </DialogDescription>
           </DialogHeader>
 
@@ -549,7 +560,11 @@ function AdminSchemesPage() {
                   onClick={() =>
                     setNewRules([
                       ...newRules,
-                      { criterion_name: "Annual Income", requirement: "Income under ₹3,00,000", rule_type: "numeric" },
+                      {
+                        criterion_name: "Annual Income",
+                        requirement: "Income under ₹3,00,000",
+                        rule_type: "numeric",
+                      },
                     ])
                   }
                   className="h-7 text-[11px] text-brand hover:text-brand"

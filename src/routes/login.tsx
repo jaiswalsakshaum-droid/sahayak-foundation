@@ -163,7 +163,11 @@ function LoginPage() {
                   : "bg-brand/10 text-brand"
               }`}
             >
-              {roleMode === "admin" ? <KeyRound className="size-5" /> : <LockKeyhole className="size-5" />}
+              {roleMode === "admin" ? (
+                <KeyRound className="size-5" />
+              ) : (
+                <LockKeyhole className="size-5" />
+              )}
             </div>
             <div>
               <CardTitle className="font-display text-xl">
@@ -255,8 +259,8 @@ function LoginPage() {
                     ? "Verifying Permissions..."
                     : t("common.loading", "Signing in...")
                   : roleMode === "admin"
-                  ? "Sign In to Admin Console"
-                  : t("auth.signInButton", "Sign In")}
+                    ? "Sign In to Admin Console"
+                    : t("auth.signInButton", "Sign In")}
                 {!isLoading && <ArrowRight className="ml-2 size-4" />}
               </Button>
             )}
@@ -271,7 +275,8 @@ function LoginPage() {
             </p>
           ) : (
             <p className="mt-5 text-center text-xs text-muted-foreground">
-              Demo Admin Credentials: <strong className="text-foreground">admin@sahayak.gov.in</strong> /{" "}
+              Demo Admin Credentials:{" "}
+              <strong className="text-foreground">admin@sahayak.gov.in</strong> /{" "}
               <strong className="text-foreground">Admin@12345</strong>
             </p>
           )}

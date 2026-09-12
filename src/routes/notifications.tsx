@@ -116,7 +116,12 @@ function NotificationsPage() {
               title: row.title || "Notification",
               message: row.body || row.message || "",
               type,
-              time: row.created_at ? new Date(row.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Recently",
+              time: row.created_at
+                ? new Date(row.created_at).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : "Recently",
               unread: !row.is_read,
               actionLabel: row.action_label,
               actionLink: row.action_link,
@@ -227,12 +232,7 @@ function NotificationsPage() {
             </p>
           </div>
           {unreadCount > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={markAllAsRead}
-              className="gap-1.5"
-            >
+            <Button variant="outline" size="sm" onClick={markAllAsRead} className="gap-1.5">
               <CheckCheck className="size-3.5" />
               Mark all as read
             </Button>
@@ -249,7 +249,8 @@ function NotificationsPage() {
             <Bell className="size-10 mx-auto mb-3 text-muted-foreground/50" />
             <h3 className="font-semibold text-foreground text-base">No notifications yet</h3>
             <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
-              You are all caught up. Updates on your document validations and application progress will appear here.
+              You are all caught up. Updates on your document validations and application progress
+              will appear here.
             </p>
           </div>
         ) : (
@@ -258,14 +259,10 @@ function NotificationsPage() {
               <div
                 key={notif.id}
                 className={`p-4 rounded-xl border ${
-                  notif.unread
-                    ? "bg-card border-brand/40 shadow-sm"
-                    : "bg-ice-2/60 border-line"
+                  notif.unread ? "bg-card border-brand/40 shadow-sm" : "bg-ice-2/60 border-line"
                 } relative overflow-hidden transition-all`}
               >
-                {notif.unread && (
-                  <div className="absolute top-0 left-0 w-1 h-full bg-brand" />
-                )}
+                {notif.unread && <div className="absolute top-0 left-0 w-1 h-full bg-brand" />}
 
                 <div className="flex gap-3.5 items-start">
                   <div className="shrink-0 mt-0.5">
@@ -283,7 +280,9 @@ function NotificationsPage() {
                       >
                         {notif.title}
                       </h3>
-                      <span className="text-[11px] text-muted-foreground shrink-0">{notif.time}</span>
+                      <span className="text-[11px] text-muted-foreground shrink-0">
+                        {notif.time}
+                      </span>
                     </div>
                     <p
                       className={`text-xs leading-relaxed ${
