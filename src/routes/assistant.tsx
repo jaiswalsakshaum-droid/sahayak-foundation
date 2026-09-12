@@ -23,6 +23,11 @@ import {
   Upload,
   ArrowDown,
   Eye,
+  EyeOff,
+  PanelLeftClose,
+  PanelLeft,
+  PanelRightClose,
+  PanelRight,
   FileBadge,
   Check,
   Edit2,
@@ -118,6 +123,10 @@ export function AssistantPage() {
     schemeName: string;
   } | null>(null);
 
+  // Sidebar and Section Collapse states
+  const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(true);
+  const [isThinkingCollapsed, setIsThinkingCollapsed] = useState(false);
+
   // Past Runs / History state
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
   const [pastRuns, setPastRuns] = useState<Array<{
@@ -152,6 +161,7 @@ export function AssistantPage() {
     errorMessage,
     startRun,
     loadRunById,
+    resetRun,
     setStatus,
   } = useAgentRun();
 
@@ -430,13 +440,19 @@ export function AssistantPage() {
   };
 
   const handleNewChat = () => {
+    resetRun();
     setHasStarted(false);
     setInput("");
     setActiveQuery("");
     setCandidateSchemes([]);
+    setSelectedScheme(null);
     setApplicationDraft(null);
     setUploadSuccessDoc(null);
     setShowResults(false);
+    setFollowUpMessages([]);
+    setSubmissionReceipt(null);
+    setEditableApplicantInfo({});
+    setIsThinkingCollapsed(false);
     setJourneySteps((prev) => prev.map((s) => ({ ...s, messages: [], details: undefined })));
   };
 
@@ -452,12 +468,16 @@ export function AssistantPage() {
 
   const handleViewPastRun = async (r: { id: string; query: string; status: string }) => {
     setShowHistoryDrawer(false);
+    resetRun();
     setActiveQuery(r.query);
     setHasStarted(true);
     setShowResults(true);
     setCandidateSchemes([]);
+    setSelectedScheme(null);
     setApplicationDraft(null);
     setUploadSuccessDoc(null);
+    setFollowUpMessages([]);
+    setSubmissionReceipt(null);
     await loadRunById(r.id);
     const intent = await understandCitizenNeed(r.query);
     const matched = await findRelevantSchemes(intent);
@@ -473,13 +493,19 @@ export function AssistantPage() {
 
   const handleSend = async (text: string) => {
     if (!text.trim()) return;
+    resetRun();
     setActiveQuery(text);
     setInput("");
     setHasStarted(true);
     setShowResults(false);
     setCandidateSchemes([]);
+    setSelectedScheme(null);
     setApplicationDraft(null);
     setUploadSuccessDoc(null);
+    setFollowUpMessages([]);
+    setSubmissionReceipt(null);
+    setEditableApplicantInfo({});
+    setIsThinkingCollapsed(false);
     setJourneySteps((prev) => prev.map((s) => ({ ...s, messages: [], details: undefined })));
 
     // 1. Initial quick matching for instant UI feedback
@@ -490,6 +516,12 @@ export function AssistantPage() {
     const resRunId = await startRun(text);
     if (resRunId && matched.length > 0) {
       setCandidateSchemes(matched);
+    }
+    // Refresh past inquiries in background to include this new run
+    if (profile?.id) {
+      getCitizenRuns(profile.id).then((runs) => {
+        setPastRuns(runs);
+      });
     }
   };
 
@@ -616,12 +648,23 @@ export function AssistantPage() {
       <div className="space-y-4">
         {/* Top Breadcrumb & Navigation Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <Link
-            to="/dashboard"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-ice hover:text-foreground transition-colors shadow-sm"
-          >
-            <ArrowLeft className="size-3.5" /> Back to Dashboard
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              to="/dashboard"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-ice hover:text-foreground transition-colors shadow-sm"
+            >
+              <ArrowLeft className="size-3.5" /> Back to Dashboard
+            </Link>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsLeftSidebarOpen(!isLeftSidebarOpen)}
+              className="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground border-line bg-card shadow-2xs gap-1.5"
+            >
+              <PanelLeft className="size-3.5 text-brand" />
+              {isLeftSidebarOpen ? "Collapse Chats" : `Past Inquiries (${pastRuns.length})`}
+            </Button>
+          </div>
           <div className="flex items-center gap-2 text-[11px] text-brand-soft">
             <span className="size-1.5 animate-pulse-dot rounded-full bg-sage" />
             Citizen AI Workforce · 6 Agents Online
@@ -631,99 +674,147 @@ export function AssistantPage() {
         {/* ChatGPT-Style Layout Container (Left Chats Sidebar + Right Main Window) */}
         <div className="flex flex-col lg:flex-row gap-6 items-start w-full">
           {/* Left Column: ChatGPT-Style Inquiries & Chats Sidebar */}
-          <aside className="w-full lg:w-72 xl:w-80 shrink-0 bg-card border border-line rounded-2xl p-3.5 flex flex-col gap-3 shadow-sm lg:sticky lg:top-4 max-h-[calc(100vh-120px)]">
-            {/* New Inquiry Button */}
-            <Button
-              onClick={handleNewChat}
-              className="w-full justify-start gap-2 bg-brand text-white hover:bg-brand/90 font-medium text-xs shadow-sm h-9"
-            >
-              <Plus className="size-4" />
-              New Inquiry
-            </Button>
+          {isLeftSidebarOpen ? (
+            <aside className="w-full lg:w-72 xl:w-80 shrink-0 bg-card border border-line rounded-2xl p-3.5 flex flex-col gap-3 shadow-sm lg:sticky lg:top-4 max-h-[calc(100vh-120px)] transition-all">
+              {/* Header with New Inquiry Button and Collapse Icon */}
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={handleNewChat}
+                  className="flex-1 justify-start gap-2 bg-brand text-white hover:bg-brand/90 font-medium text-xs shadow-sm h-9"
+                >
+                  <Plus className="size-4" />
+                  New Inquiry
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsLeftSidebarOpen(false)}
+                  className="size-9 rounded-xl text-muted-foreground hover:text-foreground hover:bg-ice shrink-0"
+                  title="Collapse Sidebar"
+                >
+                  <PanelLeftClose className="size-4" />
+                </Button>
+              </div>
 
-            {/* Sidebar Subheader */}
-            <div className="flex items-center justify-between px-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-              <span className="flex items-center gap-1.5">
-                <History className="size-3.5 text-brand" /> Past Inquiries
-              </span>
-              <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full font-mono">
-                {pastRuns.length}
-              </span>
-            </div>
+              {/* Sidebar Subheader */}
+              <div className="flex items-center justify-between px-1 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                <span className="flex items-center gap-1.5">
+                  <History className="size-3.5 text-brand" /> Past Inquiries
+                </span>
+                <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full font-mono">
+                  {pastRuns.length}
+                </span>
+              </div>
 
-            {/* Scrollable list of past chats */}
-            <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-[160px] max-h-[calc(100vh-280px)]">
-              {isLoadingHistory ? (
-                <div className="py-6 text-center text-xs text-muted-foreground">
-                  <Loader2 className="size-4 animate-spin mx-auto mb-1.5 text-brand" />
-                  Loading inquiries...
-                </div>
-              ) : pastRuns.length === 0 ? (
-                <div className="p-4 rounded-xl border border-dashed border-line bg-card/40 text-center text-xs text-muted-foreground">
-                  No past inquiries yet. Ask a question to start your first AI workforce run!
-                </div>
-              ) : (
-                pastRuns.map((r) => {
-                  const isCurrent = activeQuery === r.query;
-                  const isDone = r.status === "COMPLETED";
-                  const isAction = r.status === "ACTION REQUIRED" || r.status === "ACTION_REQUIRED";
-                  const isProc = r.status === "PROCESSING" || r.status === "RUNNING";
+              {/* Scrollable list of past chats */}
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-[160px] max-h-[calc(100vh-280px)]">
+                {isLoadingHistory ? (
+                  <div className="py-6 text-center text-xs text-muted-foreground">
+                    <Loader2 className="size-4 animate-spin mx-auto mb-1.5 text-brand" />
+                    Loading inquiries...
+                  </div>
+                ) : pastRuns.length === 0 ? (
+                  <div className="p-4 rounded-xl border border-dashed border-line bg-card/40 text-center text-xs text-muted-foreground">
+                    No past inquiries yet. Ask a question to start your first AI workforce run!
+                  </div>
+                ) : (
+                  pastRuns.map((r) => {
+                    const isCurrent = runId === r.id;
+                    const isDone = r.status === "COMPLETED";
+                    const isAction = r.status === "ACTION REQUIRED" || r.status === "ACTION_REQUIRED";
+                    const isProc = r.status === "PROCESSING" || r.status === "RUNNING";
 
-                  return (
-                    <button
-                      key={r.id}
-                      onClick={() => handleViewPastRun(r)}
-                      className={`w-full text-left p-2.5 rounded-xl border transition-all flex flex-col gap-1.5 group ${
-                        isCurrent
-                          ? "border-brand bg-brand/5 shadow-xs"
-                          : "border-line bg-card hover:border-brand/40 hover:bg-ice/50"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-1.5">
-                        <span
-                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
-                            isDone
-                              ? "bg-sage/15 text-sage"
+                    return (
+                      <button
+                        key={r.id}
+                        onClick={() => handleViewPastRun(r)}
+                        className={`w-full text-left p-2.5 rounded-xl border transition-all flex flex-col gap-1.5 group ${
+                          isCurrent
+                            ? "border-brand bg-brand/5 shadow-xs ring-1 ring-brand/30"
+                            : "border-line bg-card hover:border-brand/40 hover:bg-ice/50"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span
+                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full ${
+                              isDone
+                                ? "bg-sage/15 text-sage"
+                                : isAction
+                                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                                  : isProc
+                                    ? "bg-brand/15 text-brand"
+                                    : "bg-muted text-muted-foreground"
+                            }`}
+                          >
+                            {isDone
+                              ? "Draft Ready"
                               : isAction
-                                ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                                ? "Needs Docs"
                                 : isProc
-                                  ? "bg-brand/15 text-brand"
-                                  : "bg-muted text-muted-foreground"
-                          }`}
-                        >
-                          {isDone
-                            ? "Draft Ready"
-                            : isAction
-                              ? "Needs Docs"
-                              : isProc
-                                ? "Processing"
-                                : r.status}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground">
-                          {new Date(r.started_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
-                        </span>
-                      </div>
-                      <p className={`text-xs line-clamp-2 leading-relaxed font-medium transition-colors ${
-                        isCurrent ? "text-brand font-semibold" : "text-foreground group-hover:text-brand"
-                      }`}>
-                        "{r.query}"
-                      </p>
-                      <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-line/40">
-                        <span className="truncate max-w-[140px]">{r.scheme_name || "Civic Evaluation"}</span>
-                        <span className="text-brand opacity-0 group-hover:opacity-100 transition-opacity">Open →</span>
-                      </div>
-                    </button>
-                  );
-                })
-              )}
-            </div>
+                                  ? "Processing"
+                                  : r.status}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {new Date(r.started_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                          </span>
+                        </div>
+                        <p className={`text-xs line-clamp-2 leading-relaxed font-medium transition-colors ${
+                          isCurrent ? "text-brand font-semibold" : "text-foreground group-hover:text-brand"
+                        }`}>
+                          "{r.query}"
+                        </p>
+                        <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-line/40">
+                          <span className="truncate max-w-[140px]">{r.scheme_name || "Civic Evaluation"}</span>
+                          <span className="text-brand opacity-0 group-hover:opacity-100 transition-opacity">Open →</span>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
 
-            {/* AI Workforce Footer Pill in Sidebar */}
-            <div className="p-2.5 rounded-xl bg-mist/30 border border-line text-[11px] text-muted-foreground flex items-center gap-2 mt-auto">
-              <Sparkles className="size-3.5 text-brand shrink-0" />
-              <span className="line-clamp-2">6 autonomous AI agents assist with rules, docs & drafting.</span>
-            </div>
-          </aside>
+              {/* AI Workforce Footer Pill in Sidebar */}
+              <div className="p-2.5 rounded-xl bg-mist/30 border border-line text-[11px] text-muted-foreground flex items-center gap-2 mt-auto">
+                <Sparkles className="size-3.5 text-brand shrink-0" />
+                <span className="line-clamp-2">6 autonomous AI agents assist with rules, docs & drafting.</span>
+              </div>
+            </aside>
+          ) : (
+            <aside className="hidden lg:flex flex-col items-center gap-3 w-12 shrink-0 bg-card border border-line rounded-2xl p-2 py-3.5 shadow-sm lg:sticky lg:top-4 max-h-[calc(100vh-120px)] transition-all">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsLeftSidebarOpen(true)}
+                className="size-8 rounded-xl text-muted-foreground hover:text-foreground hover:bg-ice"
+                title="Expand Past Inquiries"
+              >
+                <PanelLeft className="size-4" />
+              </Button>
+              <Button
+                size="icon"
+                onClick={handleNewChat}
+                className="size-8 rounded-xl bg-brand text-white hover:bg-brand/90 shadow-2xs"
+                title="New Inquiry"
+              >
+                <Plus className="size-4" />
+              </Button>
+              <div className="w-6 border-t border-line my-1" />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsLeftSidebarOpen(true)}
+                className="size-8 rounded-xl text-muted-foreground hover:text-foreground hover:bg-ice relative"
+                title={`Past Inquiries (${pastRuns.length})`}
+              >
+                <History className="size-4" />
+                {pastRuns.length > 0 && (
+                  <span className="absolute -top-1 -right-1 text-[9px] bg-brand text-white rounded-full px-1 font-mono font-bold">
+                    {pastRuns.length}
+                  </span>
+                )}
+              </Button>
+            </aside>
+          )}
 
           {/* Right Column: Main Chat & Workforce Workspace Window */}
           <main className="flex-1 w-full min-w-0">
@@ -786,69 +877,92 @@ export function AssistantPage() {
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col lg:flex-row gap-8 items-start w-full">
-              {/* Workforce execution column (Perplexity-Style Internal Scroll with Collapsible Findings) */}
-              <div className="w-full lg:w-[440px] shrink-0 flex flex-col min-h-[480px] max-h-[calc(100vh-140px)] sticky top-20">
-                <div className="mb-4 rounded-xl border border-line bg-card p-4 shadow-sm shrink-0">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-                    Your Need Query
-                  </p>
-                  <p className="text-sm font-medium">{activeQuery || input}</p>
-                </div>
-
-                {/* Error State with Retry Button */}
-                {status === "ERROR" && (
-                  <div className="mb-4 rounded-xl border border-coral/30 bg-coral/10 p-4 shadow-sm shrink-0">
-                    <div className="flex items-start gap-3">
-                      <AlertCircle className="size-5 text-coral shrink-0 mt-0.5" />
-                      <div>
-                        <h3 className="font-semibold text-coral text-sm">
-                          {t("assistant.errorTitle", "Assistant Encountered an Issue")}
-                        </h3>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {errorMessage ||
-                            t(
-                              "assistant.errorDesc",
-                              "Unable to complete agent workflow. Please check your connection and try again.",
-                            )}
+              <div className="flex flex-col lg:flex-row gap-6 items-start w-full">
+                {/* Collapsible Workforce Thinking Column */}
+                {!isThinkingCollapsed ? (
+                  <div className="w-full lg:w-[420px] shrink-0 flex flex-col min-h-[480px] max-h-[calc(100vh-140px)] sticky top-20 transition-all">
+                    <div className="mb-3 rounded-xl border border-line bg-card p-3.5 shadow-sm shrink-0 flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-0.5">
+                          Your Need Query
                         </p>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={handleRetry}
-                          className="mt-3 gap-1.5 border-coral/40 text-coral hover:bg-coral/10"
-                        >
-                          <RefreshCw className="size-3.5" />
-                          {t("assistant.retry", "Retry Run")}
-                        </Button>
+                        <p className="text-xs font-medium text-foreground line-clamp-2">"{activeQuery || input}"</p>
                       </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setIsThinkingCollapsed(true)}
+                        className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground shrink-0 gap-1"
+                        title="Collapse thinking column"
+                      >
+                        <EyeOff className="size-3" /> Hide Thinking
+                      </Button>
                     </div>
-                  </div>
-                )}
 
-                {/* Main Timeline Card with Scroll Container */}
-                <div className="relative flex-1 rounded-xl border border-line bg-card p-4 shadow-sm flex flex-col overflow-hidden">
-                  <div className="flex items-center justify-between pb-3 mb-2 border-b border-line shrink-0">
-                    <h2 className="text-sm font-semibold flex items-center gap-2 font-display">
-                      <Sparkles className="size-4 text-brand" />
-                      Workforce Orchestration
-                    </h2>
-                    {status === "PROCESSING" && (
-                      <span className="inline-flex items-center gap-1.5 text-[11px] text-brand bg-brand/10 px-2 py-0.5 rounded-full font-medium">
-                        <Loader2 className="size-3 animate-spin" /> Live
-                      </span>
+                    {/* Error State with Retry Button */}
+                    {status === "ERROR" && (
+                      <div className="mb-3 rounded-xl border border-coral/30 bg-coral/10 p-3.5 shadow-sm shrink-0">
+                        <div className="flex items-start gap-3">
+                          <AlertCircle className="size-5 text-coral shrink-0 mt-0.5" />
+                          <div>
+                            <h3 className="font-semibold text-coral text-xs">
+                              {t("assistant.errorTitle", "Assistant Encountered an Issue")}
+                            </h3>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">
+                              {errorMessage ||
+                                t(
+                                  "assistant.errorDesc",
+                                  "Unable to complete agent workflow. Please check your connection and try again.",
+                                )}
+                            </p>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={handleRetry}
+                              className="mt-2.5 h-7 text-xs gap-1.5 border-coral/40 text-coral hover:bg-coral/10"
+                            >
+                              <RefreshCw className="size-3" />
+                              {t("assistant.retry", "Retry Run")}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
                     )}
-                    {status === "ACTION_REQUIRED" && (
-                      <span className="inline-flex items-center gap-1.5 text-[11px] text-amber-700 bg-amber-500/10 px-2 py-0.5 rounded-full font-medium">
-                        Paused for Input
-                      </span>
-                    )}
-                    {status === "COMPLETED" && (
-                      <span className="inline-flex items-center gap-1.5 text-[11px] text-sage bg-sage/10 px-2 py-0.5 rounded-full font-medium">
-                        <Check className="size-3" /> Completed
-                      </span>
-                    )}
-                  </div>
+
+                    {/* Main Timeline Card with Scroll Container */}
+                    <div className="relative flex-1 rounded-xl border border-line bg-card p-4 shadow-sm flex flex-col overflow-hidden">
+                      <div className="flex items-center justify-between pb-3 mb-2 border-b border-line shrink-0">
+                        <h2 className="text-xs font-semibold flex items-center gap-1.5 font-display">
+                          <Sparkles className="size-3.5 text-brand" />
+                          Workforce Orchestration
+                        </h2>
+                        <div className="flex items-center gap-2">
+                          {status === "PROCESSING" && (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-brand bg-brand/10 px-2 py-0.5 rounded-full font-medium">
+                              <Loader2 className="size-2.5 animate-spin" /> Live
+                            </span>
+                          )}
+                          {status === "ACTION_REQUIRED" && (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 bg-amber-500/10 px-2 py-0.5 rounded-full font-medium">
+                              Paused for Input
+                            </span>
+                          )}
+                          {status === "COMPLETED" && (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-sage bg-sage/10 px-2 py-0.5 rounded-full font-medium">
+                              <Check className="size-2.5" /> Done
+                            </span>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setIsThinkingCollapsed(true)}
+                            className="size-6 text-muted-foreground hover:text-foreground"
+                            title="Collapse thinking panel"
+                          >
+                            <EyeOff className="size-3" />
+                          </Button>
+                        </div>
+                      </div>
 
                   {/* Scrollable Agent Feed */}
                   <div
@@ -1084,9 +1198,53 @@ export function AssistantPage() {
                    )}
                  </div>
                </div>
+                ) : null}
 
                {/* Right Column: Dynamic Stage View (Skeletons -> Action Required -> Application Ready -> Discovered Schemes) */}
-               <div className="flex-1 w-full">
+               <div className="flex-1 w-full min-w-0">
+                  {/* Banner when thinking is collapsed */}
+                  {isThinkingCollapsed && (
+                    <div className="mb-4 flex items-center justify-between p-3.5 rounded-xl border border-line bg-card shadow-xs">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="size-8 rounded-lg bg-brand/10 text-brand flex items-center justify-center shrink-0">
+                          <Sparkles className="size-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold text-foreground">Workforce Orchestration</span>
+                            {status === "PROCESSING" && (
+                              <span className="inline-flex items-center gap-1 text-[10px] text-brand bg-brand/10 px-2 py-0.5 rounded-full font-medium">
+                                <Loader2 className="size-2.5 animate-spin" /> Live Processing
+                              </span>
+                            )}
+                            {status === "ACTION_REQUIRED" && (
+                              <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 bg-amber-500/10 px-2 py-0.5 rounded-full font-medium">
+                                Paused for Input
+                              </span>
+                            )}
+                            {status === "COMPLETED" && (
+                              <span className="inline-flex items-center gap-1 text-[10px] text-sage bg-sage/10 px-2 py-0.5 rounded-full font-medium">
+                                <Check className="size-2.5" /> Done
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11px] text-muted-foreground truncate">
+                            "{activeQuery || input}"
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsThinkingCollapsed(false)}
+                        className="h-8 text-xs gap-1.5 border-line hover:border-brand/40 hover:bg-brand/5 text-brand font-medium shrink-0 ml-3"
+                      >
+                        <Eye className="size-3.5" />
+                        Show Agent Thinking
+                      </Button>
+                    </div>
+                  )}
+
                  {/* 1. COMPLETED: Application Ready Final Summary Screen */}
                   {status === "COMPLETED" && applicationDraft ? (
                     <div className="rounded-xl border border-sage/40 bg-card p-6 shadow-sm space-y-6 animate-in fade-in duration-300">

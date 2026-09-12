@@ -157,10 +157,159 @@ export async function understandCitizenNeed(query: string): Promise<NeedIntent> 
   };
 }
 
+export interface SchemeFullDetail extends SchemeMatch {
+  jurisdiction?: string;
+  officialSource?: string;
+  eligibilityRules?: Array<{
+    id?: string;
+    criterion_name: string;
+    requirement: string;
+    rule_type?: string;
+    evidence_source?: string;
+  }>;
+}
+
 /**
- * Retrieve matching schemes from Supabase with graceful catalog fallback
+ * Fetch all active official schemes with full eligibility criteria and documents
  */
-export async function findRelevantSchemes(intent: NeedIntent): Promise<SchemeMatch[]> {
+export async function getAllSchemes(categoryFilter?: string): Promise<SchemeFullDetail[]> {
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+
+  if (isSupabaseConfigured) {
+    try {
+      let query = supabase
+        .from("schemes")
+        .select(
+          `
+          id,
+          name,
+          category,
+          jurisdiction,
+          benefit,
+          description,
+          official_source,
+          last_verified,
+          eligibility_rules (
+            id,
+            criterion_name,
+            requirement,
+            rule_type,
+            evidence_source
+          ),
+          document_requirements (
+            document_type,
+            is_mandatory
+          )
+        `,
+        )
+        .eq("eligibility_status", "Active")
+        .order("name");
+
+      if (categoryFilter && categoryFilter !== "All" && categoryFilter !== "General") {
+        query = query.eq("category", categoryFilter);
+      }
+
+      const { data, error } = await query;
+      if (!error && data && data.length > 0) {
+        return data.map((item: any, idx: number) => ({
+          id: item.id,
+          name: item.name,
+          category: item.category,
+          jurisdiction: item.jurisdiction || "Central",
+          benefit: item.benefit || "Government Benefit",
+          matchScore: 98 - Math.min(idx * 2, 20),
+          description: item.description || "",
+          official: Boolean(item.official_source),
+          officialSource: item.official_source,
+          reqDocs: item.document_requirements?.map((d: any) => d.document_type) || [],
+          eligibilityRules: item.eligibility_rules || [],
+          lastVerified: item.last_verified
+            ? new Date(item.last_verified).toLocaleDateString()
+            : "Recently",
+        }));
+      }
+    } catch (err) {
+      console.warn("[Sahayak Services] Direct Supabase schemes query failed, trying backend:", err);
+    }
+  }
+
+  // Fallback to backend /schemes
+  try {
+    const res = await fetch(`${backendUrl}/schemes`);
+    if (res.ok) {
+      const json = await res.json();
+      const list = json.schemes || [];
+      return list.map((item: any, idx: number) => ({
+        id: item.id,
+        name: item.name,
+        category: item.category,
+        jurisdiction: item.jurisdiction || "Central",
+        benefit: item.benefit || "Government Benefit",
+        matchScore: 95,
+        description: item.description || "",
+        official: Boolean(item.official_source),
+        officialSource: item.official_source,
+        reqDocs: item.document_requirements?.map((d: any) => d.document_type) || [],
+        eligibilityRules: item.eligibility_rules || [],
+        lastVerified: item.last_verified
+          ? new Date(item.last_verified).toLocaleDateString()
+          : "Recently",
+      }));
+    }
+  } catch (err) {
+    console.error("[Sahayak Services] Backend schemes fetch error:", err);
+  }
+
+  return [];
+}
+
+/**
+ * Retrieve matching schemes from Supabase or live discovery with graceful fallback
+ */
+export async function findRelevantSchemes(
+  intentOrQuery: NeedIntent | string,
+  categoryFilter?: string,
+): Promise<SchemeMatch[]> {
+  const queryStr = typeof intentOrQuery === "string" ? intentOrQuery : "";
+  const intentCategory = typeof intentOrQuery === "object" ? intentOrQuery.category : categoryFilter;
+
+  // Try backend dynamic discovery first if a query string was provided
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+  if (queryStr && queryStr.trim().length > 2) {
+    try {
+      const res = await fetch(`${backendUrl}/schemes/discover`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: queryStr, category: intentCategory || "General" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.found && data.schemes && data.schemes.length > 0) {
+          return data.schemes.map((s: any, idx: number) => ({
+            id: s.id,
+            name: s.name,
+            category: s.category,
+            jurisdiction: s.jurisdiction || "Central",
+            benefit: s.benefit || "Government Benefit",
+            matchScore: 96 - idx * 3,
+            description: s.description || "",
+            official: Boolean(s.official_source),
+            officialSource: s.official_source,
+            reqDocs: s.document_requirements?.map((d: any) => (typeof d === "string" ? d : d.document_type)) || ["Aadhaar Card"],
+            eligibilityRules: s.eligibility_rules || [],
+            lastVerified: s.last_verified ? new Date(s.last_verified).toLocaleDateString() : "Verified Active",
+          }));
+        }
+        if (data.found === false) {
+          return [];
+        }
+      }
+    } catch (err) {
+      console.warn("[Sahayak Services] Backend scheme discover failed, falling back to local DB:", err);
+    }
+  }
+
+  // Fallback to Supabase query
   if (isSupabaseConfigured) {
     try {
       let query = supabase
@@ -181,16 +330,12 @@ export async function findRelevantSchemes(intent: NeedIntent): Promise<SchemeMat
         )
         .eq("eligibility_status", "Active");
 
-      if (intent.category !== "General") {
-        query = query.eq("category", intent.category);
+      if (intentCategory && intentCategory !== "General" && intentCategory !== "All") {
+        query = query.eq("category", intentCategory);
       }
 
       const { data, error } = await query;
-      if (error) {
-        console.warn("[Sahayak Services] Schemes query error:", error);
-        return [];
-      }
-      if (data && data.length > 0) {
+      if (!error && data && data.length > 0) {
         return data.map((item: any, idx: number) => ({
           id: item.id,
           name: item.name,
@@ -215,13 +360,7 @@ export async function findRelevantSchemes(intent: NeedIntent): Promise<SchemeMat
     }
   }
 
-  // Local offline demo mode ONLY (when VITE_SUPABASE_URL is not set)
-  const filtered =
-    intent.category === "General"
-      ? LOCAL_DEMO_SCHEMES_DB
-      : LOCAL_DEMO_SCHEMES_DB.filter((s) => s.category === intent.category);
-
-  return filtered.length > 0 ? filtered : LOCAL_DEMO_SCHEMES_DB;
+  return [];
 }
 
 /**

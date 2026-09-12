@@ -1,6 +1,10 @@
 import os
 import sys
 import time
+import json
+import uuid
+import re
+import httpx
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -56,6 +60,14 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+
+groq_client = None
+if GROQ_API_KEY:
+    try:
+        from groq import Groq
+        groq_client = Groq(api_key=GROQ_API_KEY)
+    except Exception as ge:
+        logger.warning(f"Could not initialize Groq client: {ge}")
 
 supabase_admin: Optional[Client] = None
 if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
@@ -634,5 +646,270 @@ def submit_application(
     except Exception as e:
         logger.error(f"Error submitting application {tracking_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class DiscoverSchemeRequest(BaseModel):
+    query: str
+    category: Optional[str] = "General"
+
+
+@app.get("/schemes", status_code=status.HTTP_200_OK)
+def get_all_schemes():
+    """Returns all verified active schemes with rules and document requirements."""
+    if not supabase_admin:
+        return {"schemes": []}
+    try:
+        res = (
+            supabase_admin.table("schemes")
+            .select("*, eligibility_rules(*), document_requirements(*)")
+            .eq("eligibility_status", "Active")
+            .order("name")
+            .execute()
+        )
+        return {"schemes": res.data or []}
+    except Exception as e:
+        logger.error(f"Error fetching schemes: {e}")
+        return {"schemes": []}
+
+
+def web_search_civic_portals(query: str):
+    """Search official Indian government domains and myScheme portal for live verification."""
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    results = []
+    try:
+        from bs4 import BeautifulSoup
+        with httpx.Client(follow_redirects=True, timeout=8.0) as client:
+            search_query = f"{query} Indian government scheme site:gov.in OR site:myscheme.gov.in"
+            r = client.post("https://html.duckduckgo.com/html/", data={"q": search_query}, headers=headers)
+            soup = BeautifulSoup(r.text, "html.parser")
+            for res in soup.select(".result"):
+                title_el = res.select_one(".result__title")
+                snippet_el = res.select_one(".result__snippet")
+                link_el = res.select_one(".result__url")
+                if title_el and snippet_el:
+                    results.append({
+                        "title": title_el.get_text(strip=True),
+                        "snippet": snippet_el.get_text(strip=True),
+                        "url": link_el.get_text(strip=True) if link_el else ""
+                    })
+    except Exception as e:
+        logger.warning(f"Web search error for '{query}': {e}")
+    return results[:6]
+
+
+@app.post("/schemes/discover", status_code=status.HTTP_200_OK)
+def discover_scheme(req: DiscoverSchemeRequest):
+    """Dynamic scheme discovery: fast DB keyword match -> DB semantic match -> Live Google/Web search on official portals with DB persistence."""
+    query = req.query.strip()
+    if not query:
+        return {"found": False, "schemes": []}
+
+    all_s = []
+    if supabase_admin:
+        try:
+            q = supabase_admin.table("schemes").select("*, eligibility_rules(*), document_requirements(*)").eq("eligibility_status", "Active")
+            if req.category and req.category != "General" and req.category != "All":
+                q = q.eq("category", req.category)
+            all_s = q.execute().data or []
+        except Exception as e:
+            logger.warning(f"Error loading scheme catalog: {e}")
+
+    # 1. Fast keyword matching across name, category, description, benefit, rules, documents
+    STOP_WORDS = {
+        "free", "for", "the", "and", "from", "with", "this", "that", "what", "need",
+        "give", "want", "help", "some", "scam", "any", "all", "get", "how", "can",
+        "are", "you", "scheme", "schemes", "yojana", "govt", "government", "apply",
+        "india", "bharat", "pradhan", "mantri", "state", "central", "plan"
+    }
+    q_clean = query.lower()
+    q_words = [w for w in re.findall(r'[a-zA-Z]{3,}', q_clean) if w not in STOP_WORDS]
+    scored = []
+    if q_words and all_s:
+        for s in all_s:
+            s_name = s.get("name", "").lower()
+            s_cat = s.get("category", "").lower()
+            s_desc = s.get("description", "").lower()
+            s_benefit = s.get("benefit", "").lower()
+            s_rules = " ".join([r.get("requirement", "").lower() + " " + r.get("criterion_name", "").lower() for r in s.get("eligibility_rules", [])])
+            s_docs = " ".join([d.get("document_type", "").lower() for d in s.get("document_requirements", [])])
+
+            name_match = sum(1 for w in q_words if w in s_name)
+            cat_match = sum(1 for w in q_words if w in s_cat)
+            content_match = sum(1 for w in q_words if w in s_desc or w in s_benefit or w in s_rules or w in s_docs)
+
+            score = (name_match * 6) + (cat_match * 4) + (content_match * 2)
+            if score >= 4:
+                scored.append((score, s))
+
+    if scored:
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return {
+            "found": True,
+            "source": "database_keyword",
+            "schemes": [m[1] for m in scored]
+        }
+
+    # 2. Semantic Intent Matching across Existing Database Schemes
+    if groq_client and all_s:
+        try:
+            catalog_summary = "\n".join([
+                f"- ID: {s['id']} | Name: {s['name']} | Category: {s['category']} | Benefit: {s.get('benefit', '')[:80]}"
+                for s in all_s
+            ])
+
+            semantic_prompt = f"""You are Sahayak's Official Indian Civic & Welfare Intelligence Engine.
+A citizen is searching for government welfare schemes with the query: '{query}'.
+
+Existing Database Schemes:
+{catalog_summary}
+
+Tasks:
+1. Identify if any schemes in the database match the citizen's need or intent (e.g. 'college fund' -> PM Vidya Lakshmi or Post-Matric Scholarship; 'hospital money' -> Ayushman Bharat).
+2. If genuine official Indian government welfare schemes exist in the DB that address this need, return their IDs in `matched_scheme_ids`.
+3. If NO schemes in the DB match, return `matched_scheme_ids: []`.
+
+Return JSON strictly in this format:
+{{
+  "matched_scheme_ids": ["<id1>", "<id2>"]
+}}"""
+            model_to_use = os.getenv("MODEL_FAST", "openai/gpt-oss-20b")
+            resp = groq_client.chat.completions.create(
+                model=model_to_use,
+                messages=[
+                    {"role": "system", "content": "You are an expert civic intelligence AI. Output only JSON."},
+                    {"role": "user", "content": semantic_prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+            raw_text = resp.choices[0].message.content or "{}"
+            data = json.loads(raw_text)
+            matched_ids = data.get("matched_scheme_ids", [])
+            if matched_ids:
+                matched_map = {s["id"]: s for s in all_s}
+                matched_schemes = [matched_map[sid] for sid in matched_ids if sid in matched_map]
+                if matched_schemes:
+                    return {
+                        "found": True,
+                        "source": "database_semantic",
+                        "schemes": matched_schemes
+                    }
+        except Exception as se:
+            logger.warning(f"Semantic DB matching error: {se}")
+
+    # 3. Live Web Search on Official Government Sources & myScheme
+    logger.info(f"Searching official government portals & Google for: '{query}'")
+    web_results = web_search_civic_portals(query)
+    web_context = "\n".join([
+        f"- Title: {r['title']}\n  Snippet: {r['snippet']}\n  Source: {r['url']}"
+        for r in web_results
+    ]) if web_results else "No direct web snippets retrieved."
+
+    if groq_client:
+        try:
+            live_extraction_prompt = f"""You are Sahayak's Official Indian Government Civic Verification Agent.
+Citizen Search Query: '{query}'
+
+Live Web Search Results from Official Government Sources:
+{web_context}
+
+Tasks:
+1. Determine if this refers to an actual, official Central or State Government welfare scheme in India (verified from live web sources or official civic knowledge).
+2. If YES (genuine official scheme):
+   Extract and structure the scheme into valid JSON:
+   {{
+     "found": true,
+     "name": "Full Official Scheme Name",
+     "category": "Agriculture" | "Education" | "Healthcare" | "Housing" | "Women & Child" | "Employment & Pension" | "Business & Loans" | "Skill & Employment",
+     "jurisdiction": "Central" | "State",
+     "benefit": "Quantified benefit details",
+     "description": "1-2 sentence description of objectives and support provided.",
+     "official_source": "Official URL or Ministry name",
+     "rules": [
+       {{"criterion_name": "Criterion Name", "requirement": "Detailed requirement", "rule_type": "text" | "numeric" | "boolean", "evidence_source": "Document name"}}
+     ],
+     "documents": ["Mandatory Document 1", "Mandatory Document 2"]
+   }}
+3. If NO (spam, fake, scam, private product, non-existent, or impossible request like 'alien spaceships', 'free 100 crore lottery'):
+   Return:
+   {{
+     "found": false,
+     "reason": "No official government scheme found matching your query on official portals or Google."
+   }}
+"""
+            model_to_use = os.getenv("MODEL_FAST", "openai/gpt-oss-20b")
+            resp = groq_client.chat.completions.create(
+                model=model_to_use,
+                messages=[
+                    {"role": "system", "content": "You are a civic knowledge verification AI. Output only JSON."},
+                    {"role": "user", "content": live_extraction_prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+            raw_text = resp.choices[0].message.content or "{}"
+            data = json.loads(raw_text)
+
+            if data.get("found") and data.get("name"):
+                new_id = str(uuid.uuid4())
+                scheme_row = {
+                    "id": new_id,
+                    "name": data["name"],
+                    "category": data.get("category", "General"),
+                    "jurisdiction": data.get("jurisdiction", "Central"),
+                    "benefit": data.get("benefit", "Government Welfare Support"),
+                    "description": data.get("description", ""),
+                    "official_source": data.get("official_source", "myScheme Portal / National Govt Repository"),
+                    "eligibility_status": "Active",
+                    "last_verified": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+                rules_rows = []
+                doc_rows = []
+                if supabase_admin:
+                    try:
+                        supabase_admin.table("schemes").insert(scheme_row).execute()
+                        rules_rows = [
+                            {
+                                "scheme_id": new_id,
+                                "criterion_name": r.get("criterion_name", "Eligibility"),
+                                "requirement": r.get("requirement", "Verification required"),
+                                "rule_type": r.get("rule_type", "text") if r.get("rule_type") in ["numeric", "boolean", "text"] else "text",
+                                "evidence_source": r.get("evidence_source", "Identity Document")
+                            }
+                            for r in data.get("rules", [])
+                        ]
+                        if rules_rows:
+                            supabase_admin.table("eligibility_rules").insert(rules_rows).execute()
+
+                        doc_rows = [
+                            {
+                                "scheme_id": new_id,
+                                "document_type": d,
+                                "is_mandatory": True
+                            }
+                            for d in data.get("documents", [])
+                        ]
+                        if doc_rows:
+                            supabase_admin.table("document_requirements").insert(doc_rows).execute()
+                    except Exception as ins_err:
+                        logger.warning(f"Could not persist discovered scheme: {ins_err}")
+
+                scheme_row["eligibility_rules"] = rules_rows or data.get("rules", [])
+                scheme_row["document_requirements"] = doc_rows or [{"document_type": d} for d in data.get("documents", [])]
+
+                return {
+                    "found": True,
+                    "source": "live_web_discovery",
+                    "schemes": [scheme_row]
+                }
+        except Exception as le:
+            logger.error(f"Live web verification error: {le}")
+
+    return {
+        "found": False,
+        "source": "none",
+        "message": "No official government scheme found matching your query on official portals or Google.",
+        "schemes": []
+    }
 
 

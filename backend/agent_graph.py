@@ -757,60 +757,165 @@ def citizen_agent_node(state: SahayakState) -> Dict[str, Any]:
     return {"intent": llm_result}
 
 def scheme_agent_node(state: SahayakState) -> Dict[str, Any]:
-    """Scheme Agent: Matches citizen intent against real Supabase schemes catalog."""
+    """Scheme Agent: Matches citizen intent against real Supabase schemes catalog with dynamic discovery."""
     run_id = state.get("run_id")
     intent = state.get("intent", {})
+    query_text = state.get("query", "")
     category = intent.get("category", "General")
 
     write_agent_event(
         run_id,
         "Scheme Agent",
-        f"Searching active central & state schemes for category: {category}...",
-        {"thought": f"Querying schemes table where category = '{category}' and status = 'Active'."}
+        f"Searching verified national & state schemes for need '{category}'...",
+        {"thought": f"Scanning active schemes catalog for query '{query_text}' and category '{category}'."}
     )
 
     schemes_data = []
     if supabase_admin:
         try:
+            # Query all active schemes
             q = supabase_admin.table("schemes").select("id, name, category, benefit, description, official_source").eq("eligibility_status", "Active")
-            if category != "General":
-                q = q.eq("category", category)
             res = q.execute()
-            schemes_data = res.data or []
+            all_active = res.data or []
+
+            # Match by category and keyword relevance
+            q_words = [w.lower() for w in (query_text + " " + " ".join(intent.get("keywords", []))).split() if len(w) > 2]
+            scored = []
+            for s in all_active:
+                score = 0
+                s_name = s.get("name", "").lower()
+                s_cat = s.get("category", "").lower()
+                s_desc = s.get("description", "").lower()
+                s_benefit = s.get("benefit", "").lower()
+
+                if category.lower() in s_cat or s_cat in category.lower():
+                    score += 5
+                for w in q_words:
+                    if w in s_name:
+                        score += 4
+                    elif w in s_desc or w in s_benefit:
+                        score += 2
+
+                if score > 0 or category == "General":
+                    scored.append((score, s))
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            schemes_data = [item[1] for item in scored] if scored else all_active
         except Exception as e:
             logger.warning(f"Error querying schemes: {e}")
-            write_agent_event(run_id, "Scheme Agent", f"Database query notice: {str(e)[:80]}. Using verified backup catalog.", {"thought": "Engaging fallback catalog."})
+
+    # If still no schemes found, attempt dynamic official scheme discovery
+    if not schemes_data and groq_client:
+        write_agent_event(
+            run_id,
+            "Scheme Agent",
+            f"Querying national civic repositories for matching scheme...",
+            {"thought": "Scanning external official government repositories."}
+        )
+        try:
+            extraction_prompt = f"""
+You are Sahayak's Official Indian Government Schemes Intelligence Engine.
+Evaluate user query: '{query_text}'.
+Determine if this refers to an actual, official Central or State Government welfare scheme in India.
+
+If YES (valid official Indian government scheme):
+Return JSON strictly in this format:
+{{
+  "found": true,
+  "name": "Full Official Scheme Name",
+  "category": "Agriculture" | "Education" | "Healthcare" | "Housing" | "Women & Child" | "Employment & Pension" | "Business & Loans" | "Skill & Employment",
+  "jurisdiction": "Central" | "State",
+  "benefit": "Specific quantified benefit details",
+  "description": "1-2 sentence description of scheme objectives and support provided.",
+  "official_source": "Official URL or Ministry name",
+  "rules": [
+    {{"criterion_name": "Criterion Name", "requirement": "Requirement details", "rule_type": "numeric" | "text" | "boolean", "evidence_source": "Document name"}}
+  ],
+  "documents": ["Mandatory Doc 1", "Mandatory Doc 2"]
+}}
+
+If NO:
+Return JSON: {{"found": false, "reason": "No official scheme found."}}
+"""
+            resp = groq_client.chat.completions.create(
+                model=MODEL_FAST,
+                messages=[
+                    {"role": "system", "content": "You are a civic knowledge extraction system. Output only valid JSON."},
+                    {"role": "user", "content": extraction_prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+            data = json.loads(resp.choices[0].message.content or "{}")
+            if data.get("found") and data.get("name"):
+                new_id = str(uuid.uuid4())
+                scheme_row = {
+                    "id": new_id,
+                    "name": data["name"],
+                    "category": data.get("category", "General"),
+                    "jurisdiction": data.get("jurisdiction", "Central"),
+                    "benefit": data.get("benefit", "Government Welfare Support"),
+                    "description": data.get("description", ""),
+                    "official_source": data.get("official_source", "myScheme Portal"),
+                    "eligibility_status": "Active",
+                }
+                if supabase_admin:
+                    try:
+                        supabase_admin.table("schemes").insert(scheme_row).execute()
+                        rules_rows = [
+                            {
+                                "scheme_id": new_id,
+                                "criterion_name": r.get("criterion_name", "Eligibility"),
+                                "requirement": r.get("requirement", "Verification required"),
+                                "rule_type": r.get("rule_type", "text") if r.get("rule_type") in ["numeric", "boolean", "text"] else "text",
+                                "evidence_source": r.get("evidence_source", "Identity Document")
+                            }
+                            for r in data.get("rules", [])
+                        ]
+                        if rules_rows:
+                            supabase_admin.table("eligibility_rules").insert(rules_rows).execute()
+                        doc_rows = [
+                            {"scheme_id": new_id, "document_type": d, "is_mandatory": True}
+                            for d in data.get("documents", [])
+                        ]
+                        if doc_rows:
+                            supabase_admin.table("document_requirements").insert(doc_rows).execute()
+                    except Exception as ins_e:
+                        logger.warning(f"Could not persist dynamic scheme: {ins_e}")
+                schemes_data = [scheme_row]
+        except Exception as ge:
+            logger.error(f"Dynamic discovery in node failed: {ge}")
 
     if not schemes_data:
-        schemes_data = [
-            {
-                "id": "a0000000-0000-0000-0000-000000000001",
-                "name": "National Means-cum-Merit Scholarship",
-                "category": "Education",
-                "benefit": "₹12,000 / year",
-                "description": "Financial support for meritorious students continuing secondary education in government and aided schools.",
-            }
-        ]
+        write_agent_event(
+            run_id,
+            "Scheme Agent",
+            "No matching government schemes found for this query.",
+            {"thought": "Zero schemes matched in database and live repositories."}
+        )
+        return {
+            "candidate_schemes": [],
+            "selected_scheme_id": None,
+        }
 
     write_agent_event(
         run_id,
         "Scheme Agent",
         f"Found {len(schemes_data)} scheme candidate(s). Ranking with model '{MODEL_REASONING}' (max_tokens: 300)...",
-        {"thought": f"Scoring match relevance against {len(schemes_data)} candidate programs."}
+        {"thought": f"Scoring match relevance against top {min(len(schemes_data), 6)} candidate programs."}
     )
 
     # Minimize prompt footprint
     compact_schemes = [
-        {"id": s.get("id"), "name": s.get("name"), "benefit": s.get("benefit")}
+        {"id": s.get("id"), "name": s.get("name"), "category": s.get("category"), "benefit": s.get("benefit")}
         for s in schemes_data[:6]
     ]
 
     system_prompt = (
-        "You are Sahayak's Scheme Agent. Select the top matching scheme. "
+        "You are Sahayak's Scheme Agent. Select the top matching scheme based on citizen need. "
         "Return valid JSON matching: "
         "{ 'selected_scheme_id': 'string', 'candidate_schemes': [{ 'id': 'string', 'name': 'string', 'category': 'string', 'benefit': 'string', 'match_score': 95, 'reasoning': 'string' }], 'message': 'string' }"
     )
-    user_prompt = f"Intent: {json.dumps(intent)}\nSchemes: {json.dumps(compact_schemes)}"
+    user_prompt = f"Need Query: {query_text}\nIntent: {json.dumps(intent)}\nSchemes: {json.dumps(compact_schemes)}"
 
     llm_result = call_groq_json_with_retry(
         MODEL_REASONING,

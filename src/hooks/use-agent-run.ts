@@ -356,6 +356,27 @@ export function useAgentRun() {
     }
   }, [handleIncomingEvent]);
 
+  const resetRun = useCallback(() => {
+    clearTimers();
+    clearPolling();
+    if (eventsChannelRef.current) {
+      supabase.removeChannel(eventsChannelRef.current);
+      eventsChannelRef.current = null;
+    }
+    if (runsChannelRef.current) {
+      supabase.removeChannel(runsChannelRef.current);
+      runsChannelRef.current = null;
+    }
+    setRunId(null);
+    setEvents([]);
+    setStatus("IDLE");
+    setActiveAgentIndex(-1);
+    setLatestData({});
+    setIsReconnecting(false);
+    setIsConnecting(false);
+    setErrorMessage(null);
+  }, []);
+
   return {
     runId,
     events,
@@ -367,6 +388,8 @@ export function useAgentRun() {
     errorMessage,
     startRun,
     loadRunById,
+    resetRun,
     setStatus,
   };
 }
+
