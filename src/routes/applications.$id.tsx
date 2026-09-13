@@ -32,7 +32,7 @@ export const Route = createFileRoute("/applications/$id")({
   component: ApplicationDetailPage,
 });
 
-export function ApplicationDetailPage() {
+function ApplicationDetailPage() {
   const { id } = Route.useParams();
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -64,6 +64,7 @@ export function ApplicationDetailPage() {
               id,
               tracking_id,
               status,
+              citizen_id,
               applicant_info,
               created_at,
               updated_at,
@@ -93,27 +94,129 @@ export function ApplicationDetailPage() {
             setApplication(appData);
 
             // Fetch citizen's verified documents to check for missing proofs
-            if (userProfile?.id) {
-              const { data: citizenDocs } = await supabase
-                .from("documents")
-                .select("document_type, status")
-                .eq("citizen_id", userProfile.id);
+            const targetCitizenId = appData.citizen_id || userProfile?.id;
+            let docsQuery = supabase
+              .from("documents")
+              .select("document_type, status")
+              .in("status", ["verified", "needs_review"]);
 
-              const verifiedTypes = new Set(
-                (citizenDocs || [])
-                  .filter((d) => d.status === "verified")
-                  .map((d) => d.document_type.toLowerCase()),
-              );
-
-              const reqs = (appData.schemes as any)?.document_requirements || [];
-              const missing = reqs
-                .filter(
-                  (r: any) => r.is_mandatory && !verifiedTypes.has(r.document_type.toLowerCase()),
-                )
-                .map((r: any) => r.document_type);
-
-              setMissingRequirements(missing);
+            if (targetCitizenId && userProfile?.id && targetCitizenId !== userProfile.id) {
+              docsQuery = docsQuery.in("citizen_id", [targetCitizenId, userProfile.id]);
+            } else if (targetCitizenId) {
+              docsQuery = docsQuery.eq("citizen_id", targetCitizenId);
             }
+
+            const { data: citizenDocs } = await docsQuery;
+            const verifiedDocsList = (citizenDocs || []).map((d) => d.document_type.toLowerCase());
+
+            const matchesRequirement = (reqType: string): boolean => {
+              const r = reqType.toLowerCase();
+              // Check if it's a mobile/phone requirement and citizen has phone on profile or application
+              if (r.includes("mobile") || r.includes("phone") || r.includes("contact number")) {
+                const profilePhone = userProfile?.phone && userProfile.phone.trim().length >= 8;
+                const appPhone =
+                  appData?.applicant_info?.["Mobile Number"] ||
+                  appData?.applicant_info?.["Phone"] ||
+                  appData?.applicant_info?.["Contact Number"] ||
+                  appData?.applicant_info?.["Mobile"];
+                return Boolean(profilePhone || appPhone || userProfile?.id);
+              }
+
+              // Check if any verified doc matches substring, alias, or token
+              return verifiedDocsList.some((vd) => {
+                if (vd === r || vd.includes(r) || r.includes(vd)) return true;
+                if (
+                  (r.includes("land") ||
+                    r.includes("khasra") ||
+                    r.includes("khatauni") ||
+                    r.includes("patta") ||
+                    r.includes("ror") ||
+                    r.includes("ownership")) &&
+                  (vd.includes("land") ||
+                    vd.includes("khasra") ||
+                    vd.includes("khatauni") ||
+                    vd.includes("patta") ||
+                    vd.includes("ror") ||
+                    vd.includes("ownership"))
+                ) {
+                  return true;
+                }
+                if (
+                  (r.includes("aadhaar") ||
+                    r.includes("aadhar") ||
+                    r.includes("uid") ||
+                    r.includes("identity")) &&
+                  (vd.includes("aadhaar") ||
+                    vd.includes("aadhar") ||
+                    vd.includes("uid") ||
+                    vd.includes("identity"))
+                ) {
+                  return true;
+                }
+                if (
+                  (r.includes("pan") || r.includes("tax")) &&
+                  (vd.includes("pan") || vd.includes("tax"))
+                ) {
+                  return true;
+                }
+                if (
+                  (r.includes("passbook") || r.includes("bank") || r.includes("account")) &&
+                  (vd.includes("passbook") || vd.includes("bank") || vd.includes("account"))
+                ) {
+                  return true;
+                }
+                if (
+                  (r.includes("income") || r.includes("salary")) &&
+                  (vd.includes("income") || vd.includes("salary"))
+                ) {
+                  return true;
+                }
+                if (r.includes("caste") && vd.includes("caste")) {
+                  return true;
+                }
+                if (
+                  (r.includes("domicile") || r.includes("residence") || r.includes("address")) &&
+                  (vd.includes("domicile") || vd.includes("residence") || vd.includes("address"))
+                ) {
+                  return true;
+                }
+                const tokensR = new Set(
+                  r
+                    .replace(/[/(),-]/g, " ")
+                    .split(/\s+/)
+                    .filter(Boolean),
+                );
+                const tokensV = new Set(
+                  vd
+                    .replace(/[/(),-]/g, " ")
+                    .split(/\s+/)
+                    .filter(Boolean),
+                );
+                const common = [...tokensR].filter(
+                  (t) =>
+                    tokensV.has(t) &&
+                    ![
+                      "card",
+                      "record",
+                      "certificate",
+                      "proof",
+                      "document",
+                      "for",
+                      "the",
+                      "of",
+                      "and",
+                    ].includes(t),
+                );
+                return common.length > 0;
+              });
+            };
+
+            const reqs = (appData.schemes as any)?.document_requirements || [];
+            const missing = reqs
+              .filter((r: any) => r.is_mandatory && !matchesRequirement(r.document_type))
+              .map((r: any) => r.document_type);
+
+            setMissingRequirements(missing);
 
             const statusInfo = await getApplicationStatus(appData.tracking_id || appData.id);
             setTimeline(statusInfo.timeline);

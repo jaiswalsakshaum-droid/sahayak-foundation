@@ -304,7 +304,7 @@ export function SchemeCard({
                   label={scheme.status}
                 />
                 <Button asChild size="sm" variant="ghost" className="text-brand">
-                  <Link to="/schemes/$id" params={{ id: scheme.id }}>
+                  <Link to="/schemes">
                     View <ChevronRight className="size-3.5" />
                   </Link>
                 </Button>

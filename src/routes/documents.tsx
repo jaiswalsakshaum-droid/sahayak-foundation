@@ -273,7 +273,19 @@ function DocumentsPage() {
             extractedFields: doc.extracted_fields || {},
             confidence: doc.confidence ? Math.round(Number(doc.confidence) * 100) : undefined,
           }));
-          setDocumentsList(mapped);
+
+          // Deduplicate items so only 1 verified card per document type is rendered
+          const deduplicated: DocumentItem[] = [];
+          const seenTypes = new Set<string>();
+          for (const item of mapped) {
+            const normType = item.type.toLowerCase().trim();
+            if (!seenTypes.has(normType)) {
+              seenTypes.add(normType);
+              deduplicated.push(item);
+            }
+          }
+
+          setDocumentsList(deduplicated);
         }
       } catch (e) {
         console.warn("[Sahayak] Failed to load user documents:", e);
@@ -315,7 +327,11 @@ function DocumentsPage() {
               confidence: doc.confidence ? Math.round(Number(doc.confidence) * 100) : undefined,
             };
             setDocumentsList((prev) => {
-              const existingIdx = prev.findIndex((d) => d.id === doc.id);
+              const existingIdx = prev.findIndex(
+                (d) =>
+                  d.id === doc.id ||
+                  d.type.toLowerCase() === (doc.document_type || "").toLowerCase(),
+              );
               if (existingIdx >= 0) {
                 const next = [...prev];
                 next[existingIdx] = updatedItem;
@@ -346,6 +362,53 @@ function DocumentsPage() {
       supabase.removeChannel(channel);
     };
   }, [currentUserId, pendingDocId]);
+
+  // Polling watchdog: re-fetches documents if any are in 'Pending' status
+  useEffect(() => {
+    if (!currentUserId || !isSupabaseConfigured) return;
+    const hasPending = documentsList.some((d) => d.status.toLowerCase() === "pending");
+    if (!hasPending && !pendingDocId) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const { data, error } = await supabase
+          .from("documents")
+          .select("*")
+          .eq("citizen_id", currentUserId)
+          .order("uploaded_at", { ascending: false });
+        if (!error && data) {
+          const mapped: DocumentItem[] = data.map((doc: any) => ({
+            id: doc.id,
+            name: doc.file_name || doc.document_type || "Document",
+            type: doc.document_type || "Government Document",
+            status: mapStatus(doc.status),
+            date:
+              doc.uploaded_at || doc.created_at
+                ? new Date(doc.uploaded_at || doc.created_at).toLocaleDateString()
+                : "Recently",
+            extractedFields: doc.extracted_fields || {},
+            confidence: doc.confidence ? Math.round(Number(doc.confidence) * 100) : undefined,
+          }));
+
+          const deduplicated: DocumentItem[] = [];
+          const seenTypes = new Set<string>();
+          for (const item of mapped) {
+            const normType = item.type.toLowerCase().trim();
+            if (!seenTypes.has(normType)) {
+              seenTypes.add(normType);
+              deduplicated.push(item);
+            }
+          }
+
+          setDocumentsList(deduplicated);
+        }
+      } catch (err) {
+        console.warn("[Documents] Polling fetch error:", err);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [currentUserId, documentsList, pendingDocId]);
 
   const checklistStatus = useMemo(() => {
     if (!activeScheme) return null;
@@ -382,7 +445,12 @@ function DocumentsPage() {
           return;
         }
         setResult(docResult.data);
-        if (docResult.data.documentId && docResult.data.status === "pending") {
+        if (docResult.data.alreadyVerified) {
+          toast.info(
+            `Document already verified! Reusing verified ${docResult.data.type} credential from your vault.`,
+          );
+          setPhase("extracted");
+        } else if (docResult.data.documentId && docResult.data.status === "pending") {
           setPendingDocId(docResult.data.documentId);
           setPhase("queued");
         } else {

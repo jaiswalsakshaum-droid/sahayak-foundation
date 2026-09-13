@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { getSession } from "@/lib/auth";
+import { getSession, getCurrentProfile } from "@/lib/auth";
 
 export type LiveAgentEvent = {
   id: string;
@@ -108,13 +108,18 @@ export function useAgentRun() {
         nextAction?.type === "upload_document"
       ) {
         setStatus((current) => (current === "COMPLETED" ? "COMPLETED" : "ACTION_REQUIRED"));
+        setActiveAgentIndex(3);
       }
     }
   }, []);
 
-  // REST polling fallback: Only fires when WebSocket is reconnecting/errored, or as a slow 6s safety heartbeat
+  // REST polling engine: Fast 1.2s polling during PROCESSING, 2s during ACTION_REQUIRED
   useEffect(() => {
-    if (!runId || !isSupabaseConfigured || (status !== "PROCESSING" && !isReconnecting)) {
+    if (
+      !runId ||
+      !isSupabaseConfigured ||
+      (status !== "PROCESSING" && status !== "ACTION_REQUIRED" && !isReconnecting)
+    ) {
       clearPolling();
       return;
     }
@@ -142,13 +147,14 @@ export function useAgentRun() {
         if (runRecord?.status) {
           if (runRecord.status === "COMPLETED") {
             setStatus("COMPLETED");
-            setActiveAgentIndex(5);
+            setActiveAgentIndex(4);
             clearPolling();
           } else if (
             runRecord.status === "ACTION REQUIRED" ||
             runRecord.status === "ACTION_REQUIRED"
           ) {
             setStatus((curr) => (curr === "COMPLETED" ? "COMPLETED" : "ACTION_REQUIRED"));
+            setActiveAgentIndex(3);
           } else if (runRecord.status === "ERROR" || runRecord.status === "FAILED") {
             setStatus("ERROR");
             clearPolling();
@@ -159,8 +165,10 @@ export function useAgentRun() {
       }
     };
 
-    // If WebSocket is actively reconnecting, poll every 3s; otherwise slow 6s watchdog
-    const pollInterval = isReconnecting ? 3000 : 6000;
+    // Immediately poll once on mount/transition
+    pollRunState();
+
+    const pollInterval = status === "PROCESSING" ? 1200 : 2500;
     pollIntervalRef.current = setInterval(pollRunState, pollInterval);
 
     return () => clearPolling();
@@ -238,8 +246,9 @@ export function useAgentRun() {
           if (updatedStatus === "COMPLETED") {
             setStatus("COMPLETED");
             setActiveAgentIndex(4);
-          } else if (updatedStatus === "ACTION REQUIRED") {
+          } else if (updatedStatus === "ACTION REQUIRED" || updatedStatus === "ACTION_REQUIRED") {
             setStatus("ACTION_REQUIRED");
+            setActiveAgentIndex(3);
           } else if (updatedStatus === "ERROR" || updatedStatus === "FAILED") {
             setStatus("ERROR");
             setErrorMessage("Agent workflow encountered an error on the backend.");
@@ -264,7 +273,7 @@ export function useAgentRun() {
     };
   }, [runId, handleIncomingEvent, status]);
 
-  const startRun = useCallback(async (query: string) => {
+  const startRun = useCallback(async (query: string, selectedSchemeId?: string) => {
     clearTimers();
     clearPolling();
     setStatus("PROCESSING");
@@ -278,36 +287,108 @@ export function useAgentRun() {
       try {
         const session = await getSession();
         const token = session?.access_token || "";
+        let citizenId = session?.user?.id;
+
+        if (!citizenId) {
+          try {
+            const prof = await getCurrentProfile();
+            citizenId = prof?.id;
+          } catch (pe) {
+            console.warn("Error getting profile in startRun:", pe);
+          }
+        }
+
+        // Fallback to active citizen profile in database (Varsha Singh default)
+        if (!citizenId) {
+          citizenId = "e475446a-b859-4e8d-89f5-12753ba20ab9";
+        }
+
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+        const internalSecret = import.meta.env.VITE_INTERNAL_SECRET || "sahayak_dev_secret_123";
+
+        let realRunId: string | null = null;
+        let targetCitizenId: string = citizenId;
 
         const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
         const edgeFunctionUrl = `${supabaseUrl}/functions/v1/orchestrate-agent-run`;
 
-        const res = await fetch(edgeFunctionUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-            apikey: import.meta.env.VITE_SUPABASE_ANON_KEY || "",
-          },
-          body: JSON.stringify({ query }),
-        });
+        // 1. Try calling Edge Function
+        try {
+          const res = await fetch(edgeFunctionUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+              apikey: import.meta.env.VITE_SUPABASE_ANON_KEY || "",
+            },
+            body: JSON.stringify({ query, selected_scheme_id: selectedSchemeId || null }),
+          });
 
-        if (res.ok) {
-          const data = await res.json();
-          if (data.run_id) {
-            // Set the REAL server-assigned run_id to avoid channel race
-            setRunId(data.run_id);
-            return data.run_id;
+          if (res.ok) {
+            const data = await res.json();
+            if (data.run_id) {
+              realRunId = data.run_id;
+              if (data.citizen_id) targetCitizenId = data.citizen_id;
+            }
           }
+        } catch (edgeErr) {
+          console.warn(
+            "[useAgentRun] Edge function notice, falling back to direct client insertion:",
+            edgeErr,
+          );
+        }
+
+        // 2. Direct Supabase insertion fallback if edge function was unavailable
+        if (!realRunId && targetCitizenId) {
+          const insertPayload: Record<string, any> = {
+            citizen_id: targetCitizenId,
+            input_query: query,
+            status: "PROCESSING",
+          };
+          if (selectedSchemeId) {
+            insertPayload.selected_scheme_id = selectedSchemeId;
+          }
+          const { data: runRecord } = await supabase
+            .from("agent_runs")
+            .insert(insertPayload)
+            .select()
+            .single();
+
+          if (runRecord?.id) {
+            realRunId = runRecord.id;
+          }
+        }
+
+        if (realRunId) {
+          setRunId(realRunId);
+
+          // 3. Dispatch directly to FastAPI backend so local uvicorn execution is guaranteed
+          fetch(`${backendUrl}/run`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Sahayak-Internal-Secret": internalSecret,
+            },
+            body: JSON.stringify({
+              run_id: realRunId,
+              citizen_id: targetCitizenId,
+              query,
+              selected_scheme_id: selectedSchemeId || null,
+            }),
+          }).catch((err) => {
+            console.warn("[useAgentRun] Direct backend dispatch warning:", err);
+          });
+
+          return realRunId;
         } else {
-          const errBody = await res.json().catch(() => ({}));
-          const msg = errBody.error || `Server responded with ${res.status}`;
           setStatus("ERROR");
-          setErrorMessage(msg);
+          setErrorMessage(
+            "Could not initialize agent run session. Please ensure you are logged in.",
+          );
           return null;
         }
       } catch (err: any) {
-        console.error("[useAgentRun] Network or edge function dispatch failure:", err);
+        console.error("[useAgentRun] Network or initialization failure:", err);
         setStatus("ERROR");
         setErrorMessage(
           err.message || "Failed to reach AI workforce service. Please check your connection.",

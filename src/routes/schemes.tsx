@@ -373,14 +373,28 @@ function SchemesPage() {
                       </span>
                     </div>
 
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full bg-ice/40 hover:bg-brand hover:text-white transition-all text-xs h-8 border-line"
-                      onClick={() => setSelectedScheme(scheme)}
-                    >
-                      View Details & Eligibility
-                    </Button>
+                    <div className="grid grid-cols-2 gap-2 mt-auto">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="bg-ice/40 hover:bg-ice hover:text-foreground transition-all text-xs h-8 border-line"
+                        onClick={() => setSelectedScheme(scheme)}
+                      >
+                        View Details
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="bg-brand hover:bg-brand/90 text-white transition-all text-xs h-8 font-medium"
+                        onClick={() => {
+                          navigate({
+                            to: "/assistant",
+                            search: { schemeId: scheme.id, schemeName: scheme.name } as any,
+                          });
+                        }}
+                      >
+                        Apply Directly
+                      </Button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -530,15 +544,19 @@ function SchemesPage() {
                     </Button>
                     <Button
                       size="sm"
-                      className="bg-brand hover:bg-brand/90 text-xs gap-1.5 flex-1 sm:flex-none"
+                      className="bg-brand hover:bg-brand/90 text-xs gap-1.5 flex-1 sm:flex-none font-medium text-white shadow-sm"
                       onClick={() => {
+                        const schemeId = selectedScheme.id;
                         const schemeName = selectedScheme.name;
                         setSelectedScheme(null);
-                        navigate({ to: "/assistant" });
+                        navigate({
+                          to: "/assistant",
+                          search: { schemeId, schemeName } as any,
+                        });
                       }}
                     >
-                      <Sparkles className="size-3.5" />
-                      Apply with AI Assistant
+                      <FileText className="size-3.5" />
+                      Apply Directly to this Scheme
                     </Button>
                   </div>
                 </div>

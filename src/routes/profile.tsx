@@ -312,17 +312,15 @@ function ProfilePage() {
           <div className="p-5 space-y-4">
             <IntegrationRow
               name="DigiLocker"
-              status="Connected"
               desc="Import verified documents seamlessly"
               icon={Shield}
-              active
+              comingSoon
             />
             <IntegrationRow
               name="UMANG API"
-              status="Connected"
               desc="Sync government benefit statuses"
               icon={Bot}
-              active
+              comingSoon
             />
             <IntegrationRow
               name="Bank Account"
@@ -358,7 +356,20 @@ function ProfilePage() {
   );
 }
 
-function IntegrationRow({ name, status, desc, icon: Icon, active: initialActive = false }: any) {
+function IntegrationRow({
+  name,
+  desc,
+  icon: Icon,
+  active: initialActive = false,
+  comingSoon = false,
+}: {
+  name: string;
+  desc: string;
+  icon: any;
+  status?: string;
+  active?: boolean;
+  comingSoon?: boolean;
+}) {
   const [active, setActive] = useState(initialActive);
   const [connecting, setConnecting] = useState(false);
 
@@ -374,17 +385,34 @@ function IntegrationRow({ name, status, desc, icon: Icon, active: initialActive 
     <div className="flex items-center justify-between p-4 rounded-lg border border-line bg-ice-2">
       <div className="flex items-center gap-4">
         <div
-          className={`grid size-10 place-items-center rounded-lg ${active ? "bg-sage/10 text-sage" : "bg-card text-muted-foreground"}`}
+          className={`grid size-10 place-items-center rounded-lg ${
+            active
+              ? "bg-sage/10 text-sage"
+              : comingSoon
+                ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                : "bg-card text-muted-foreground"
+          }`}
         >
           <Icon className="size-5" />
         </div>
         <div>
-          <h4 className="font-medium text-sm">{name}</h4>
+          <div className="flex items-center gap-2">
+            <h4 className="font-medium text-sm">{name}</h4>
+            {comingSoon && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                Coming Soon
+              </span>
+            )}
+          </div>
           <p className="text-xs text-muted-foreground">{desc}</p>
         </div>
       </div>
       <div>
-        {active ? (
+        {comingSoon ? (
+          <span className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground bg-mist/60 px-2.5 py-1 rounded-full border border-line">
+            Coming Soon
+          </span>
+        ) : active ? (
           <span className="inline-flex items-center gap-1 text-xs font-medium text-sage bg-sage/10 px-2.5 py-1 rounded-full border border-sage/20">
             <CheckCircle2 className="size-3.5" /> Connected
           </span>

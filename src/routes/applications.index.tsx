@@ -113,7 +113,19 @@ function ApplicationsPage() {
             actionReady: isAwaitingApproval,
           };
         });
-        setApplications(mapped);
+
+        // Deduplicate applications by schemeName so citizens see at most 1 active application per scheme
+        const deduped: AppItem[] = [];
+        const seenSchemes = new Set<string>();
+        for (const app of mapped) {
+          const key = app.schemeName.toLowerCase().trim();
+          if (!seenSchemes.has(key)) {
+            seenSchemes.add(key);
+            deduped.push(app);
+          }
+        }
+
+        setApplications(deduped);
       }
     } catch (err) {
       console.warn("[Sahayak] Failed to load citizen applications:", err);

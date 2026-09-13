@@ -116,7 +116,7 @@ def call_groq_json_with_retry(
     user_prompt: str,
     pydantic_model: Optional[Any] = None,
     max_retries: int = 1,
-    max_tokens: int = 300,
+    max_tokens: int = 1024,
     run_id: Optional[str] = None,
     agent_name: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
@@ -143,7 +143,15 @@ def call_groq_json_with_retry(
                 temperature=0.1,
                 max_tokens=max_tokens,
             )
-            raw_text = response.choices[0].message.content
+            raw_text = response.choices[0].message.content or "{}"
+            raw_text = raw_text.strip()
+            if raw_text.startswith("```"):
+                lines = raw_text.splitlines()
+                if lines and lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].startswith("```"):
+                    lines = lines[:-1]
+                raw_text = "\n".join(lines).strip()
             parsed_json = json.loads(raw_text)
 
             # Validate against Pydantic schema if provided
@@ -690,6 +698,29 @@ def citizen_agent_node(state: SahayakState) -> Dict[str, Any]:
     run_id = state.get("run_id")
     query = state.get("query", "")
     profile = state.get("citizen_profile", {})
+    preselected_scheme_id = state.get("selected_scheme_id")
+
+    # If applying directly to a specific scheme, fast-track intent from scheme record
+    if preselected_scheme_id and supabase_admin:
+        try:
+            s_res = supabase_admin.table("schemes").select("id, name, category, benefit").eq("id", preselected_scheme_id).maybe_single().execute()
+            if s_res.data:
+                target_s = s_res.data
+                direct_intent = {
+                    "category": target_s.get("category", "General"),
+                    "urgency": "medium",
+                    "keywords": [w for w in target_s["name"].split() if len(w) > 3],
+                    "summary": f"Citizen applying directly to {target_s['name']}.",
+                }
+                write_agent_event(
+                    run_id,
+                    "Citizen Agent",
+                    f"Direct scheme selected: '{target_s['name']}' ({target_s.get('category', 'General')}).",
+                    {"intent": direct_intent, "thought": "Citizen initiated direct application for targeted scheme. Skipping broad query ambiguity."}
+                )
+                return {"intent": direct_intent}
+        except Exception as e:
+            logger.warning(f"Could not load preselected scheme for citizen agent: {e}")
 
     write_agent_event(
         run_id,
@@ -713,17 +744,21 @@ def citizen_agent_node(state: SahayakState) -> Dict[str, Any]:
     write_agent_event(
         run_id,
         "Citizen Agent",
-        f"Classifying need using model '{MODEL_FAST}' (max_tokens: 150)...",
-        {"thought": "Evaluating domain keywords (Education, Agriculture, Housing, Employment, Welfare)."}
+        f"Classifying need using model '{MODEL_FAST}'...",
+        {"thought": "Evaluating domain keywords (Agriculture, Education, Housing, Employment, Healthcare, Welfare)."}
     )
 
     system_prompt = (
-        "You are Sahayak's Citizen Agent. Analyze the citizen's query and profile to classify their need. "
-        "Return a valid JSON object matching this schema: "
-        "{ 'category': 'Education'|'Agriculture'|'Housing'|'Employment & Pension'|'Women & Child'|'General', "
-        "'urgency': 'low'|'medium'|'high', 'keywords': ['list', 'of', 'terms'], 'summary': '1 sentence summary' }"
+        "You are Sahayak's Citizen Agent. Analyze the citizen's query and profile to accurately classify their civic need. "
+        "Return a valid JSON object strictly matching this schema: "
+        "{\n"
+        "  \"category\": \"Agriculture\" | \"Education\" | \"Housing\" | \"Employment & Pension\" | \"Women & Child\" | \"Healthcare\" | \"Business & Loans\" | \"General\",\n"
+        "  \"urgency\": \"low\" | \"medium\" | \"high\",\n"
+        "  \"keywords\": [\"relevant\", \"topic\", \"terms\"],\n"
+        "  \"summary\": \"1 concise sentence summary of what the citizen is seeking\"\n"
+        "}"
     )
-    user_prompt = f"Query: {query[:200]}\nProfile: {json.dumps(profile)}"
+    user_prompt = f"Citizen Query: {query[:300]}\nCitizen Profile: {json.dumps(profile)}"
 
     llm_result = call_groq_json_with_retry(
         MODEL_FAST,
@@ -731,17 +766,34 @@ def citizen_agent_node(state: SahayakState) -> Dict[str, Any]:
         user_prompt,
         pydantic_model=NeedIntent,
         max_retries=1,
-        max_tokens=150,
+        max_tokens=600,
         run_id=run_id,
         agent_name="Citizen Agent",
     )
     if not llm_result:
-        category = "Education" if "scholarship" in query.lower() or "study" in query.lower() or "school" in query.lower() else "General"
+        q_low = query.lower()
+        if any(k in q_low for k in ["kisan", "farmer", "agriculture", "crop", "fasal", "krishi", "land", "patta", "khasra", "samman nidhi", "fertilizer", "tractor"]):
+            category = "Agriculture"
+        elif any(k in q_low for k in ["scholarship", "study", "school", "college", "fee", "student", "education", "vidya", "matric"]):
+            category = "Education"
+        elif any(k in q_low for k in ["house", "housing", "awas", "pmay", "shelter", "construction", "ghar"]):
+            category = "Housing"
+        elif any(k in q_low for k in ["pension", "vridha", "senior", "employment", "job", "mgnrega", "unemployment", "rozgar", "shramik"]):
+            category = "Employment & Pension"
+        elif any(k in q_low for k in ["women", "girl", "beti", "matritva", "widow", "mahila", "ladli", "maternity", "sukanya"]):
+            category = "Women & Child"
+        elif any(k in q_low for k in ["health", "ayushman", "hospital", "medical", "treatment", "arogya", "swasthya"]):
+            category = "Healthcare"
+        elif any(k in q_low for k in ["loan", "mudra", "business", "svanidhi", "street vendor", "startup", "dukan"]):
+            category = "Business & Loans"
+        else:
+            category = "General"
+
         llm_result = {
             "category": category,
-            "urgency": "high" if "urgent" in query.lower() or "help" in query.lower() else "medium",
-            "keywords": [w for w in query.split() if len(w) > 4][:5],
-            "summary": f"Citizen requested assistance regarding {category.lower()} benefits.",
+            "urgency": "high" if any(k in q_low for k in ["urgent", "emergency", "immediate", "help"]) else "medium",
+            "keywords": [w for w in query.split() if len(w) > 3][:6],
+            "summary": f"Citizen requested assistance regarding {category.lower()} benefits for '{query}'.",
         }
 
     # Cache intent classification
@@ -762,6 +814,41 @@ def scheme_agent_node(state: SahayakState) -> Dict[str, Any]:
     intent = state.get("intent", {})
     query_text = state.get("query", "")
     category = intent.get("category", "General")
+    preselected_id = state.get("selected_scheme_id")
+
+    # If scheme was directly selected by citizen, bypass broader discovery & scoring
+    if preselected_id and supabase_admin:
+        try:
+            res = supabase_admin.table("schemes").select("*").eq("id", preselected_id).maybe_single().execute()
+            if res.data:
+                target_scheme = res.data
+                candidate_list = [{
+                    "id": target_scheme["id"],
+                    "name": target_scheme["name"],
+                    "category": target_scheme.get("category", "General"),
+                    "benefit": target_scheme.get("benefit", ""),
+                    "match_score": 100,
+                    "reasoning": "Direct application mode: User targeted this specific scheme.",
+                }]
+                write_agent_event(
+                    run_id,
+                    "Scheme Agent",
+                    f"Selected scheme '{target_scheme['name']}' directly for eligibility verification.",
+                    {"candidate_schemes": candidate_list, "selected_scheme_id": preselected_id, "direct_mode": True, "thought": f"Scheme {target_scheme['name']} pre-selected. Directing straight to eligibility evaluation."}
+                )
+                try:
+                    supabase_admin.table("agent_runs").update({
+                        "selected_scheme_id": preselected_id
+                    }).eq("id", run_id).execute()
+                except Exception as ue:
+                    logger.warning(f"Could not update selected_scheme_id on agent_runs: {ue}")
+
+                return {
+                    "candidate_schemes": candidate_list,
+                    "selected_scheme_id": preselected_id,
+                }
+        except Exception as se:
+            logger.warning(f"Error fetching preselected scheme {preselected_id}: {se}")
 
     write_agent_event(
         run_id,
@@ -900,7 +987,7 @@ Return JSON: {{"found": false, "reason": "No official scheme found."}}
     write_agent_event(
         run_id,
         "Scheme Agent",
-        f"Found {len(schemes_data)} scheme candidate(s). Ranking with model '{MODEL_REASONING}' (max_tokens: 300)...",
+        f"Found {len(schemes_data)} scheme candidate(s). Ranking with model '{MODEL_REASONING}' (max_tokens: 1024)...",
         {"thought": f"Scoring match relevance against top {min(len(schemes_data), 6)} candidate programs."}
     )
 
@@ -923,7 +1010,7 @@ Return JSON: {{"found": false, "reason": "No official scheme found."}}
         user_prompt,
         pydantic_model=SchemeRankingResult,
         max_retries=1,
-        max_tokens=300,
+        max_tokens=1024,
         run_id=run_id,
         agent_name="Scheme Agent",
     )
@@ -993,7 +1080,7 @@ def evaluate_text_rules_batched(
         system_prompt,
         user_prompt,
         max_retries=1,
-        max_tokens=400,
+        max_tokens=800,
         run_id=run_id,
         agent_name="Eligibility Agent",
     )
@@ -1143,6 +1230,7 @@ def document_agent_node(state: SahayakState) -> Dict[str, Any]:
     run_id = state.get("run_id")
     scheme_id = state.get("selected_scheme_id")
     citizen_id = state.get("citizen_id")
+    profile = state.get("citizen_profile", {})
     retry_count = state.get("retry_count", 0)
 
     write_agent_event(run_id, "Document Agent", "Comparing mandatory document requirements against citizen records...")
@@ -1166,7 +1254,7 @@ def document_agent_node(state: SahayakState) -> Dict[str, Any]:
     on_file_docs = []
     if supabase_admin and citizen_id:
         try:
-            doc_res = supabase_admin.table("documents").select("*").eq("citizen_id", citizen_id).eq("status", "verified").execute()
+            doc_res = supabase_admin.table("documents").select("*").eq("citizen_id", citizen_id).in_("status", ["verified", "needs_review", "pending"]).execute()
             on_file_docs = doc_res.data or []
         except Exception as e:
             logger.error(f"Error querying verified documents: {e}")
@@ -1176,10 +1264,25 @@ def document_agent_node(state: SahayakState) -> Dict[str, Any]:
     missing_docs = []
     verified_doc_names = []
 
+    def matches_doc_type(req_name: str, on_file_name: str) -> bool:
+        r = req_name.lower()
+        d = on_file_name.lower()
+        if r in d or d in r:
+            return True
+        tokens_r = set(r.replace("/", " ").replace("(", " ").replace(")", " ").replace("-", " ").split())
+        tokens_d = set(d.replace("/", " ").replace("(", " ").replace(")", " ").replace("-", " ").split())
+        common = tokens_r.intersection(tokens_d) - {"card", "record", "certificate", "proof", "document", "for", "the", "of", "and"}
+        return len(common) > 0
+
     for req in required_docs:
         req_type = req.get("document_type", "")
-        # Check if type is present in on_file_types (case-insensitive substring match)
-        is_present = any(req_type.lower() in ft or ft in req_type.lower() for ft in on_file_types)
+        # Check if phone/mobile requirement is already present in citizen profile
+        if any(k in req_type.lower() for k in ["mobile", "phone", "contact number"]):
+            if profile.get("phone") or profile.get("mobile"):
+                verified_doc_names.append(req_type)
+                continue
+        # Check if type is present in on_file_types (smart token / substring match)
+        is_present = any(matches_doc_type(req_type, ft) for ft in on_file_types)
         if is_present:
             verified_doc_names.append(req_type)
         elif req.get("is_mandatory", True):
@@ -1322,43 +1425,86 @@ def application_agent_node(state: SahayakState) -> Dict[str, Any]:
         ]
     }
 
+    already_applied = False
+    existing_tracking_id = None
+    existing_status = None
+
     if supabase_admin and citizen_id and scheme_id:
         try:
-            existing = (
+            # 1. Check if citizen has already submitted / applied for this scheme
+            already_submitted = (
                 supabase_admin.table("applications")
-                .select("id")
+                .select("id, status, tracking_id, applicant_info")
                 .eq("citizen_id", citizen_id)
                 .eq("scheme_id", scheme_id)
-                .in_("status", ["draft", "awaiting_approval", "pending_citizen_approval"])
+                .in_("status", ["submitted", "under_review", "approved", "in_progress", "pending_admin_review"])
+                .order("created_at", desc=True)
                 .execute()
             )
-            if existing.data and len(existing.data) > 0:
-                app_id = existing.data[0]["id"]
-                supabase_admin.table("applications").update({
-                    "status": "awaiting_approval",
-                    "applicant_info": applicant_info,
-                    "tracking_id": draft_id,
-                    "source_run_id": run_id,
-                    "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                }).eq("id", app_id).execute()
-                logger.info(f"Updated existing application draft {draft_id} (id={app_id}) for citizen_id={citizen_id}")
+
+            if already_submitted.data and len(already_submitted.data) > 0:
+                already_applied = True
+                first_sub = already_submitted.data[0]
+                existing_tracking_id = first_sub.get("tracking_id") or first_sub["id"]
+                existing_status = first_sub.get("status") or "submitted"
+                draft_id = existing_tracking_id
+                if first_sub.get("applicant_info"):
+                    applicant_info = first_sub["applicant_info"]
+                logger.info(f"Citizen {citizen_id} has ALREADY applied for scheme {scheme_id} (#{existing_tracking_id}). Duplicate application creation blocked.")
             else:
-                supabase_admin.table("applications").insert({
-                    "citizen_id": citizen_id,
-                    "scheme_id": scheme_id,
-                    "status": "awaiting_approval",
-                    "applicant_info": applicant_info,
-                    "tracking_id": draft_id,
-                    "source_run_id": run_id,
-                }).execute()
-                logger.info(f"Persisted new application draft {draft_id} for citizen_id={citizen_id}")
+                # 2. Check for an existing unsubmitted draft to update instead of inserting duplicates
+                existing_draft = (
+                    supabase_admin.table("applications")
+                    .select("id, tracking_id")
+                    .eq("citizen_id", citizen_id)
+                    .eq("scheme_id", scheme_id)
+                    .in_("status", ["draft", "awaiting_approval", "pending_citizen_approval"])
+                    .execute()
+                )
+                if existing_draft.data and len(existing_draft.data) > 0:
+                    app_id = existing_draft.data[0]["id"]
+                    draft_id = existing_draft.data[0].get("tracking_id") or draft_id
+                    supabase_admin.table("applications").update({
+                        "status": "awaiting_approval",
+                        "applicant_info": applicant_info,
+                        "tracking_id": draft_id,
+                        "source_run_id": run_id,
+                        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    }).eq("id", app_id).execute()
+                    logger.info(f"Updated existing application draft {draft_id} (id={app_id}) for citizen_id={citizen_id}")
+                else:
+                    supabase_admin.table("applications").insert({
+                        "citizen_id": citizen_id,
+                        "scheme_id": scheme_id,
+                        "status": "awaiting_approval",
+                        "applicant_info": applicant_info,
+                        "tracking_id": draft_id,
+                        "source_run_id": run_id,
+                    }).execute()
+                    logger.info(f"Persisted new application draft {draft_id} for citizen_id={citizen_id}")
         except Exception as e:
-            logger.error(f"Error persisting application draft: {e}")
+            logger.error(f"Error checking/persisting application draft: {e}")
+
+    if already_applied:
+        ai_summary["already_applied"] = True
+        ai_summary["existing_tracking_id"] = existing_tracking_id
+        ai_summary["reasoning"] = f"You have already applied for {scheme_name} (Tracking ID: #{existing_tracking_id}). Your application status is '{existing_status}'. Duplicate applications for the same scheme are not allowed."
+        ai_summary["next_steps"] = [
+            f"Track your active application #{existing_tracking_id} on the dashboard.",
+            "Departmental verification is actively in progress."
+        ]
+        status_to_use = existing_status
+        event_msg = f"Already applied for this scheme (Tracking ID: #{existing_tracking_id}). Status: {existing_status}."
+    else:
+        status_to_use = "awaiting_approval"
+        event_msg = f"Application draft #{draft_id} created and ready for citizen approval."
 
     application_draft = {
         "id": draft_id,
         "scheme_id": scheme_id,
-        "status": "awaiting_approval",
+        "status": status_to_use,
+        "already_applied": already_applied,
+        "tracking_id": existing_tracking_id or draft_id,
         "applicant_info": applicant_info,
         "ai_summary": ai_summary,
     }
@@ -1366,7 +1512,7 @@ def application_agent_node(state: SahayakState) -> Dict[str, Any]:
     write_agent_event(
         run_id,
         "Application Agent",
-        f"Application draft #{draft_id} created and ready for citizen approval.",
+        event_msg,
         {"application_draft": application_draft, "ai_summary": ai_summary, "event_code": "APPLICATION_DRAFT_CREATED"},
         event_code="APPLICATION_DRAFT_CREATED",
     )

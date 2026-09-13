@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   ArrowRight,
@@ -43,6 +43,7 @@ import {
   HelpCircle,
   Info,
   Plus,
+  Phone,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -69,9 +70,16 @@ import {
   askAgentFollowUp,
   type SchemeMatch,
 } from "@/lib/services";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { AppShell } from "@/components/sahayak";
 
 export const Route = createFileRoute("/assistant")({
+  validateSearch: (search: Record<string, unknown>): { schemeId?: string; schemeName?: string } => {
+    return {
+      schemeId: typeof search.schemeId === "string" ? search.schemeId : undefined,
+      schemeName: typeof search.schemeName === "string" ? search.schemeName : undefined,
+    };
+  },
   beforeLoad: async () => {
     await requireAuth();
   },
@@ -87,9 +95,11 @@ type JourneyStep = {
   details?: Record<string, any>;
 };
 
-export function AssistantPage() {
+function AssistantPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const search = Route.useSearch();
+  const initSchemeHandledRef = useRef<string | null>(null);
   const [input, setInput] = useState("");
   const [activeQuery, setActiveQuery] = useState("");
   const [hasStarted, setHasStarted] = useState(false);
@@ -158,6 +168,29 @@ export function AssistantPage() {
   const [showMissingDocsConfirmDialog, setShowMissingDocsConfirmDialog] = useState(false);
   const [selectedUploadDocType, setSelectedUploadDocType] = useState<string>("");
   const [showScrollBottomPill, setShowScrollBottomPill] = useState(false);
+  const [phoneInputs, setPhoneInputs] = useState<Record<string, string>>({});
+  const [isSavingPhone, setIsSavingPhone] = useState(false);
+  const [vaultDocs, setVaultDocs] = useState<string[]>([]);
+
+  const refreshVaultDocs = useCallback(
+    async (citizenId?: string) => {
+      const targetId = citizenId || profile?.id;
+      if (!isSupabaseConfigured || !targetId) return;
+      try {
+        const { data } = await supabase
+          .from("documents")
+          .select("document_type, status")
+          .eq("citizen_id", targetId)
+          .in("status", ["verified", "needs_review"]);
+        if (data) {
+          setVaultDocs(data.map((d) => d.document_type));
+        }
+      } catch (e) {
+        console.warn("Failed to load vault docs:", e);
+      }
+    },
+    [profile?.id],
+  );
 
   const journeyScrollRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
@@ -342,17 +375,18 @@ export function AssistantPage() {
     }
   }, [events, activeAgentIndex, latestData, status]);
 
-  // Load citizen profile and past inquiries on mount
+  // Load citizen profile, vault docs and past inquiries on mount
   useEffect(() => {
     getCurrentProfile().then((p) => {
       if (p) {
         setProfile(p);
+        refreshVaultDocs(p.id);
         getCitizenRuns(p.id).then((runs) => {
           setPastRuns(runs);
         });
       }
     });
-  }, []);
+  }, [refreshVaultDocs]);
 
   // Load criteria when a scheme is selected in dialog
   useEffect(() => {
@@ -433,6 +467,19 @@ export function AssistantPage() {
   };
 
   const handleSubmitDirectly = async () => {
+    if (
+      applicationDraft?.already_applied ||
+      applicationDraft?.status === "submitted" ||
+      applicationDraft?.status === "under_review" ||
+      applicationDraft?.status === "approved"
+    ) {
+      toast.info(
+        `You have already applied for this scheme (Tracking ID: #${applicationDraft.tracking_id || applicationDraft.id}).`,
+      );
+      navigate({ to: "/dashboard" });
+      return;
+    }
+
     if (!directConsent) {
       toast.error(
         t(
@@ -458,12 +505,16 @@ export function AssistantPage() {
           : applicationDraft.applicant_info,
       );
       if (res.success) {
+        if ((res as any).alreadyApplied) {
+          toast.info("You have already applied for this scheme. Tracking active application.");
+        } else {
+          toast.success(t("assistant.submitSuccess", "Application submitted successfully!"));
+        }
         setSubmissionReceipt({
           trackingId: res.trackingId,
           submittedAt: res.submittedAt,
           schemeName: targetScheme,
         });
-        toast.success(t("assistant.submitSuccess", "Application submitted successfully!"));
       }
     } catch (err: any) {
       toast.error(err.message || "Failed to submit application.");
@@ -524,7 +575,7 @@ export function AssistantPage() {
     handleSend(pastQuery);
   };
 
-  const handleSend = async (text: string) => {
+  const handleSend = async (text: string, targetSchemeId?: string) => {
     if (!text.trim()) return;
     resetRun();
     setActiveQuery(text);
@@ -542,14 +593,43 @@ export function AssistantPage() {
     setJourneySteps((prev) => prev.map((s) => ({ ...s, messages: [], details: undefined })));
 
     // 1. Initial quick matching for instant UI feedback
-    const intent = await understandCitizenNeed(text);
-    const matched = await findRelevantSchemes(intent);
-
-    // 2. Trigger real backend LangGraph orchestration run
-    const resRunId = await startRun(text);
-    if (resRunId && matched.length > 0) {
-      setCandidateSchemes(matched);
+    if (targetSchemeId && isSupabaseConfigured) {
+      try {
+        const { data: directScheme } = await supabase
+          .from("schemes")
+          .select("*")
+          .eq("id", targetSchemeId)
+          .maybeSingle();
+        if (directScheme) {
+          const directMatch: SchemeMatch = {
+            id: directScheme.id,
+            name: directScheme.name,
+            category: directScheme.category,
+            benefit: directScheme.benefit || "",
+            match: "100%",
+            matchScore: 100,
+            status: "Eligible",
+            source: directScheme.official_source || "Official Portal",
+            description: directScheme.description || "",
+            reqDocs: [],
+          };
+          setCandidateSchemes([directMatch]);
+          setSelectedScheme(directMatch);
+        }
+      } catch (err) {
+        console.warn("Could not load direct scheme details:", err);
+      }
+    } else {
+      const intent = await understandCitizenNeed(text);
+      const matched = await findRelevantSchemes(intent);
+      if (matched.length > 0) {
+        setCandidateSchemes(matched);
+      }
     }
+
+    // 2. Trigger real backend LangGraph orchestration run with targetSchemeId
+    await startRun(text, targetSchemeId);
+
     // Refresh past inquiries in background to include this new run
     if (profile?.id) {
       getCitizenRuns(profile.id).then((runs) => {
@@ -558,9 +638,20 @@ export function AssistantPage() {
     }
   };
 
+  // Auto-start direct scheme evaluation if arrived with schemeId in search params
+  useEffect(() => {
+    if (search.schemeId && initSchemeHandledRef.current !== search.schemeId) {
+      initSchemeHandledRef.current = search.schemeId;
+      const schemeLabel = search.schemeName || "Selected Scheme";
+      const q = `Apply for ${schemeLabel}`;
+      handleSend(q, search.schemeId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search.schemeId, search.schemeName]);
+
   const handleRetry = () => {
     if (activeQuery) {
-      handleSend(activeQuery);
+      handleSend(activeQuery, selectedScheme?.id);
     } else if (input) {
       handleSend(input);
     }
@@ -631,32 +722,218 @@ export function AssistantPage() {
 
     try {
       const uploadRes = await validateDocument(file, docType);
-      if (uploadRes.success) {
+      if (uploadRes.ok || (uploadRes as any).success) {
+        const isAlready = uploadRes.ok && uploadRes.data.alreadyVerified;
         setUploadSuccessDoc(docType);
-        setUploadExtractionStep(
-          `Vision AI (Gemini 3.6 Flash) parsing ${docType}... Re-evaluating rules.`,
-        );
+        if (isAlready) {
+          setUploadExtractionStep(
+            `Document already verified (${docType}). Reusing verified credential from vault...`,
+          );
+          toast.info(`${docType} is already verified in your vault. Reusing verified credential.`);
+        } else {
+          setUploadExtractionStep(
+            `Document registered & verified (${docType}). AI workforce is re-evaluating criteria...`,
+          );
+          toast.success(`${docType} uploaded and verified successfully!`);
+        }
 
-        // Trigger resume after short delay to let backend extraction complete
+        // Refresh vault docs immediately so UI updates instantly
+        await refreshVaultDocs();
+
+        // Trigger resume after short delay to re-evaluate with updated vault records
         setTimeout(() => {
           handleResumeWorkflow(false);
-        }, 1500);
+        }, 1000);
+      } else {
+        const errorMsg =
+          uploadRes.ok === false ? uploadRes.error : "Upload failed. Please try again.";
+        setUploadExtractionStep(errorMsg);
+        toast.error(errorMsg);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Upload error:", err);
       setUploadExtractionStep("Document upload failed. Please try again.");
+      toast.error(err.message || "Failed to upload document.");
     } finally {
       setTimeout(() => {
         setIsUploadingMissingDoc(false);
-      }, 3000);
+      }, 2500);
     }
   };
 
-  // Missing documents list helper
-  const missingDocsList: string[] =
-    latestData.missing_documents ||
-    (latestData.pending_requirements || []).map((p: any) => p.document_type) ||
-    (latestData.next_action?.document_name ? [latestData.next_action.document_name] : []);
+  const handleSavePhone = async (docName: string, phoneVal: string) => {
+    const cleaned = phoneVal.trim();
+    if (!cleaned || cleaned.length < 8) {
+      toast.error("Please enter a valid mobile number.");
+      return;
+    }
+    setIsSavingPhone(true);
+    try {
+      if (profile?.id) {
+        await supabase.from("profiles").update({ phone: cleaned }).eq("id", profile.id);
+        setProfile((prev) => (prev ? { ...prev, phone: cleaned } : null));
+        toast.success("Mobile number verified successfully!");
+        await refreshVaultDocs();
+        handleResumeWorkflow(false);
+      }
+    } catch (e: any) {
+      toast.error("Failed to save mobile number.");
+    } finally {
+      setIsSavingPhone(false);
+    }
+  };
+
+  // Helper to check if a requirement is satisfied by vault documents or profile
+  const isDocSatisfied = useCallback(
+    (reqName: string): boolean => {
+      const r = reqName.toLowerCase();
+      if (r.includes("mobile") || r.includes("phone") || r.includes("contact number")) {
+        return Boolean(profile?.phone && profile.phone.trim().length >= 8);
+      }
+      return vaultDocs.some((vd) => {
+        const v = vd.toLowerCase();
+        if (v === r || v.includes(r) || r.includes(v)) return true;
+        if (
+          (r.includes("land") ||
+            r.includes("khasra") ||
+            r.includes("khatauni") ||
+            r.includes("patta") ||
+            r.includes("ror") ||
+            r.includes("ownership")) &&
+          (v.includes("land") ||
+            v.includes("khasra") ||
+            v.includes("khatauni") ||
+            v.includes("patta") ||
+            v.includes("ror") ||
+            v.includes("ownership"))
+        ) {
+          return true;
+        }
+        if (
+          (r.includes("aadhaar") ||
+            r.includes("aadhar") ||
+            r.includes("uid") ||
+            r.includes("identity")) &&
+          (v.includes("aadhaar") ||
+            v.includes("aadhar") ||
+            v.includes("uid") ||
+            v.includes("identity"))
+        ) {
+          return true;
+        }
+        if ((r.includes("pan") || r.includes("tax")) && (v.includes("pan") || v.includes("tax"))) {
+          return true;
+        }
+        if (
+          (r.includes("passbook") || r.includes("bank") || r.includes("account")) &&
+          (v.includes("passbook") || v.includes("bank") || v.includes("account"))
+        ) {
+          return true;
+        }
+        if (
+          (r.includes("income") || r.includes("salary")) &&
+          (v.includes("income") || v.includes("salary"))
+        ) {
+          return true;
+        }
+        if (r.includes("caste") && v.includes("caste")) {
+          return true;
+        }
+        if (
+          (r.includes("domicile") || r.includes("residence") || r.includes("address")) &&
+          (v.includes("domicile") || v.includes("residence") || v.includes("address"))
+        ) {
+          return true;
+        }
+        const tokensR = new Set(
+          r
+            .replace(/[/(),-]/g, " ")
+            .split(/\s+/)
+            .filter(Boolean),
+        );
+        const tokensV = new Set(
+          v
+            .replace(/[/(),-]/g, " ")
+            .split(/\s+/)
+            .filter(Boolean),
+        );
+        const common = [...tokensR].filter(
+          (t) =>
+            tokensV.has(t) &&
+            ![
+              "card",
+              "record",
+              "certificate",
+              "proof",
+              "document",
+              "for",
+              "the",
+              "of",
+              "and",
+            ].includes(t),
+        );
+        return common.length > 0;
+      });
+    },
+    [profile?.phone, vaultDocs],
+  );
+
+  // Base raw required documents from scheme or latestData
+  const rawRequirements: string[] = useMemo(() => {
+    if (Array.isArray(latestData.missing_documents) && latestData.missing_documents.length > 0) {
+      return latestData.missing_documents.map((d: any) =>
+        typeof d === "string" ? d : d.document_type || "Document",
+      );
+    }
+    if (
+      Array.isArray(latestData.pending_requirements) &&
+      latestData.pending_requirements.length > 0
+    ) {
+      return latestData.pending_requirements.map((p: any) =>
+        typeof p === "string" ? p : p.document_type || p.name || "Document",
+      );
+    }
+    if (latestData.next_action?.document_name) {
+      return [latestData.next_action.document_name];
+    }
+    const docStep = journeySteps.find((s) => s.agentId === "document");
+    if (
+      docStep?.details?.missing_documents &&
+      Array.isArray(docStep.details.missing_documents) &&
+      docStep.details.missing_documents.length > 0
+    ) {
+      return docStep.details.missing_documents.map((d: any) =>
+        typeof d === "string" ? d : d.document_type || "Document",
+      );
+    }
+    if (
+      docStep?.details?.pending_requirements &&
+      Array.isArray(docStep.details.pending_requirements) &&
+      docStep.details.pending_requirements.length > 0
+    ) {
+      return docStep.details.pending_requirements.map((p: any) =>
+        typeof p === "string" ? p : p.document_type || "Document",
+      );
+    }
+    if (
+      candidateSchemes.length > 0 &&
+      candidateSchemes[0]?.reqDocs &&
+      candidateSchemes[0].reqDocs.length > 0
+    ) {
+      return candidateSchemes[0].reqDocs;
+    }
+    return [];
+  }, [latestData, journeySteps, candidateSchemes]);
+
+  // Filter out any document that is ALREADY verified in the vault!
+  const missingDocsList: string[] = useMemo(() => {
+    return rawRequirements.filter((req) => !isDocSatisfied(req));
+  }, [rawRequirements, isDocSatisfied]);
+
+  // Verified documents list for this scheme
+  const verifiedSchemeDocs: string[] = useMemo(() => {
+    return rawRequirements.filter((req) => isDocSatisfied(req));
+  }, [rawRequirements, isDocSatisfied]);
 
   // Contextual loading copy helper
   const getActiveAgentCopy = () => {
@@ -1244,7 +1521,7 @@ export function AssistantPage() {
                                                 (doc: string, dIdx: number) => (
                                                   <span
                                                     key={dIdx}
-                                                    className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-200 text-[11px] font-medium"
+                                                    className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-900 dark:text-amber-200 text-[11px] font-medium max-w-full break-words"
                                                   >
                                                     {typeof doc === "object" && doc !== null
                                                       ? JSON.stringify(doc)
@@ -1591,213 +1868,408 @@ export function AssistantPage() {
                       </div>
 
                       {/* Direct Citizen Consent & 1-Click Submission Box */}
-                      <div className="p-4 rounded-xl border border-sage/40 bg-sage/5 space-y-3">
-                        <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            checked={directConsent}
-                            onChange={(e) => setDirectConsent(e.target.checked)}
-                            className="mt-0.5 rounded border-line text-brand focus:ring-brand"
-                          />
-                          <span className="text-xs text-foreground leading-relaxed">
-                            I verify that the applicant details above are accurate and grant
-                            permission to Sahayak AI to submit this application to the department on
-                            my behalf.
-                          </span>
-                        </label>
-
-                        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                          <div className="flex items-center gap-2">
+                      {applicationDraft?.already_applied ||
+                      applicationDraft?.status === "submitted" ||
+                      applicationDraft?.status === "under_review" ||
+                      applicationDraft?.status === "approved" ? (
+                        <div className="p-4 rounded-xl border border-brand/30 bg-brand/5 space-y-3">
+                          <div className="flex items-start gap-2.5 text-xs text-brand font-medium">
+                            <CheckCircle2 className="size-4 shrink-0 mt-0.5 text-brand" />
+                            <div>
+                              <p className="font-semibold text-xs text-foreground">
+                                Already Applied for this Scheme
+                              </p>
+                              <p className="text-[11px] text-muted-foreground mt-0.5">
+                                You have already submitted an application for this scheme (#
+                                {applicationDraft.tracking_id || applicationDraft.id}). Department
+                                verification is active.
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between gap-3 pt-1 border-t border-line/50">
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => navigate({ to: "/dashboard" })}
-                            >
-                              Track in Dashboard
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="text-xs text-muted-foreground"
                               onClick={() =>
                                 navigate({
                                   to: "/applications/$id",
-                                  params: { id: applicationDraft.id },
+                                  params: {
+                                    id: applicationDraft.tracking_id || applicationDraft.id,
+                                  },
                                 })
                               }
+                              className="text-xs"
                             >
-                              Open Full Form <ChevronRight className="size-3 ml-1" />
+                              View Full Application <ChevronRight className="size-3 ml-1" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              className="bg-brand hover:bg-brand/90 gap-1.5 shadow-sm font-semibold text-xs"
+                              onClick={() => navigate({ to: "/dashboard" })}
+                            >
+                              <CheckCircle2 className="size-3.5" /> Already Applied · Track in
+                              Dashboard
                             </Button>
                           </div>
-
-                          <Button
-                            size="sm"
-                            className="bg-brand hover:bg-brand/90 gap-1.5 shadow-sm font-semibold"
-                            disabled={isSubmittingDirect || !directConsent}
-                            onClick={handleSubmitDirectly}
-                          >
-                            {isSubmittingDirect ? (
-                              <Loader2 className="size-4 animate-spin" />
-                            ) : (
-                              <CheckCircle2 className="size-4" />
-                            )}
-                            Submit Application Directly
-                          </Button>
                         </div>
-                      </div>
-                    </div>
-                  ) : (status === "ACTION_REQUIRED" || missingDocsList.length > 0) &&
-                    status !== "COMPLETED" ? (
-                    /* 2. ACTION_REQUIRED: Multi-Document Inline Uploader & Auto-Resume Trigger (Phase C) */
-                    <div className="rounded-xl border border-amber-500/40 bg-card p-6 shadow-sm space-y-6 animate-in fade-in duration-300">
-                      <div className="flex items-start gap-3">
-                        <div className="grid size-10 place-items-center rounded-xl bg-amber-500/15 text-amber-600 shrink-0">
-                          <FileWarning className="size-5" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h2 className="text-lg font-bold font-display text-foreground">
-                              Action Required: Missing Documents
-                            </h2>
-                            <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300">
-                              Paused for Input
+                      ) : (
+                        <div className="p-4 rounded-xl border border-sage/40 bg-sage/5 space-y-3">
+                          <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={directConsent}
+                              onChange={(e) => setDirectConsent(e.target.checked)}
+                              className="mt-0.5 rounded border-line text-brand focus:ring-brand"
+                            />
+                            <span className="text-xs text-foreground leading-relaxed">
+                              I verify that the applicant details above are accurate and grant
+                              permission to Sahayak AI to submit this application to the department
+                              on my behalf.
                             </span>
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Document Agent paused the workflow. Upload any of the{" "}
-                            {missingDocsList.length} required document(s) below to automatically
-                            extract data, re-evaluate eligibility, and resume application drafting.
-                          </p>
-                        </div>
-                      </div>
+                          </label>
 
-                      {/* Hidden Native File Input */}
-                      <input
-                        type="file"
-                        ref={fileInputRef}
-                        accept="image/*,application/pdf"
-                        className="hidden"
-                        onChange={handleMissingDocUpload}
-                      />
-
-                      {/* Document List Grid */}
-                      <div className="space-y-3">
-                        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                          Required Documents ({missingDocsList.length})
-                        </h3>
-                        <div className="grid grid-cols-1 gap-2.5">
-                          {missingDocsList.map((docName, idx) => {
-                            const isThisUploading =
-                              isUploadingMissingDoc && selectedUploadDocType === docName;
-                            const isUploaded = uploadSuccessDoc === docName;
-
-                            return (
-                              <div
-                                key={idx}
-                                className={`p-4 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-                                  isUploaded
-                                    ? "border-sage/50 bg-sage/5"
-                                    : "border-line bg-ice-2/30 hover:border-brand/40"
-                                }`}
+                          <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                            <div className="flex items-center gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => navigate({ to: "/dashboard" })}
                               >
-                                <div className="flex items-center gap-3">
-                                  <div
-                                    className={`grid size-9 place-items-center rounded-lg ${
-                                      isUploaded ? "bg-sage/15 text-sage" : "bg-brand/10 text-brand"
-                                    }`}
-                                  >
-                                    {isUploaded ? (
-                                      <Check className="size-4" />
-                                    ) : (
-                                      <FileText className="size-4" />
-                                    )}
-                                  </div>
-                                  <div>
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-sm font-semibold text-foreground">
-                                        {docName}
-                                      </span>
-                                      <span className="text-[10px] px-2 py-0.5 rounded font-medium bg-amber-500/15 text-amber-700 dark:text-amber-300">
-                                        Mandatory
-                                      </span>
-                                    </div>
-                                    <p className="text-[11px] text-muted-foreground mt-0.5">
-                                      {isUploaded
-                                        ? "Verified with Vision AI · Auto-resuming run..."
-                                        : "PDF or clear photo (max 10MB)"}
-                                    </p>
-                                  </div>
-                                </div>
+                                Track in Dashboard
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-xs text-muted-foreground"
+                                onClick={() =>
+                                  navigate({
+                                    to: "/applications/$id",
+                                    params: { id: applicationDraft.id },
+                                  })
+                                }
+                              >
+                                Open Full Form <ChevronRight className="size-3 ml-1" />
+                              </Button>
+                            </div>
 
-                                <Button
-                                  size="sm"
-                                  variant={isUploaded ? "outline" : "default"}
-                                  disabled={isUploadingMissingDoc}
-                                  onClick={() => triggerUploadForDoc(docName)}
-                                  className={`shrink-0 gap-1.5 ${
-                                    isUploaded
-                                      ? "border-sage/40 text-sage hover:bg-sage/10"
-                                      : "bg-brand hover:bg-brand/90"
-                                  }`}
-                                >
-                                  {isThisUploading ? (
-                                    <>
-                                      <Loader2 className="size-3.5 animate-spin" /> Extracting...
-                                    </>
-                                  ) : isUploaded ? (
-                                    <>
-                                      <Check className="size-3.5" /> Uploaded
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Upload className="size-3.5" /> Upload {docName}
-                                    </>
-                                  )}
-                                </Button>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      {/* Active Extraction / Gemini Vision Progress Indicator */}
-                      {uploadExtractionStep && (
-                        <div className="p-3.5 rounded-lg bg-brand/10 border border-brand/25 text-xs text-brand font-medium flex items-center gap-2.5 animate-pulse">
-                          <Loader2 className="size-4 animate-spin shrink-0" />
-                          <span>{uploadExtractionStep}</span>
+                            <Button
+                              size="sm"
+                              className="bg-brand hover:bg-brand/90 gap-1.5 shadow-sm font-semibold"
+                              disabled={isSubmittingDirect || !directConsent}
+                              onClick={handleSubmitDirectly}
+                            >
+                              {isSubmittingDirect ? (
+                                <Loader2 className="size-4 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="size-4" />
+                              )}
+                              Submit Application Directly
+                            </Button>
+                          </div>
                         </div>
                       )}
+                    </div>
+                  ) : (status === "ACTION_REQUIRED" || rawRequirements.length > 0) &&
+                    status !== "COMPLETED" ? (
+                    /* 2. ACTION_REQUIRED / VERIFIED DOCUMENTS CHECKPOINT (Phase C) */
+                    <>
+                      {missingDocsList.length === 0 ? (
+                        /* All Required Documents Are Verified & Available */
+                        <div className="rounded-xl border border-sage/50 bg-card p-5 sm:p-6 shadow-sm space-y-5 animate-in fade-in duration-300 overflow-hidden">
+                          <div className="flex items-start gap-3">
+                            <div className="grid size-10 place-items-center rounded-xl bg-sage/15 text-sage shrink-0">
+                              <ShieldCheck className="size-5" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h2 className="text-lg font-bold font-display text-foreground">
+                                  All Required Documents Verified
+                                </h2>
+                                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-sage/15 text-sage">
+                                  Verified
+                                </span>
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                                All mandatory proofs for this scheme are verified in your vault.
+                                Ready to assemble your application draft.
+                              </p>
+                            </div>
+                          </div>
 
-                      {/* Action Controls & Continue Button */}
-                      <div className="pt-4 border-t border-line flex flex-wrap items-center justify-between gap-3">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={isUploadingMissingDoc}
-                          onClick={() => handleResumeWorkflow(false)}
-                          className="gap-1.5"
-                        >
-                          <RefreshCw
-                            className={`size-3.5 ${isUploadingMissingDoc ? "animate-spin" : ""}`}
+                          {/* Verified Documents on File List */}
+                          <div className="space-y-3">
+                            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                              Verified Items on File ({rawRequirements.length})
+                            </h3>
+                            <div className="grid grid-cols-1 gap-2.5">
+                              {rawRequirements.map((docName, idx) => (
+                                <div
+                                  key={idx}
+                                  className="p-3 rounded-xl border border-sage/40 bg-sage/5 flex items-center justify-between gap-3"
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <div className="grid size-7 place-items-center rounded-lg bg-sage/15 text-sage shrink-0">
+                                      <Check className="size-3.5" />
+                                    </div>
+                                    <span className="text-xs font-medium text-foreground truncate">
+                                      {docName}
+                                    </span>
+                                  </div>
+                                  <span className="text-[10px] font-semibold text-sage px-2 py-0.5 rounded bg-sage/15 shrink-0">
+                                    Verified
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Direct Proceed Button */}
+                          <div className="pt-4 border-t border-line flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={isUploadingMissingDoc}
+                              onClick={() => handleResumeWorkflow(false)}
+                              className="gap-1.5 text-xs h-9"
+                            >
+                              <RefreshCw
+                                className={`size-3.5 ${isUploadingMissingDoc ? "animate-spin" : ""}`}
+                              />
+                              Re-Check Vault
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              disabled={isUploadingMissingDoc}
+                              onClick={() => handleResumeWorkflow(false)}
+                              className="bg-brand hover:bg-brand/90 gap-2 text-xs h-9 font-semibold shadow-sm"
+                            >
+                              Proceed to Application Draft <ArrowRight className="size-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Missing Mandatory Documents UI */
+                        <div className="rounded-xl border border-amber-500/40 bg-card p-5 sm:p-6 shadow-sm space-y-5 animate-in fade-in duration-300 overflow-hidden">
+                          <div className="flex items-start gap-3">
+                            <div className="grid size-10 place-items-center rounded-xl bg-amber-500/15 text-amber-600 shrink-0">
+                              <FileWarning className="size-5" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h2 className="text-lg font-bold font-display text-foreground">
+                                  Action Required: Missing Documents
+                                </h2>
+                                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300">
+                                  Paused for Input
+                                </span>
+                              </div>
+                              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                                Document Agent paused the workflow. Upload any available documents
+                                below to extract verified data, or proceed with what you have.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Prominent Guidance & Limitation Notice Banner */}
+                          <div className="p-3.5 rounded-xl border border-amber-500/30 bg-amber-500/10 flex items-start gap-2.5 text-xs text-amber-900 dark:text-amber-200">
+                            <AlertCircle className="size-4 text-amber-600 shrink-0 mt-0.5" />
+                            <div className="space-y-1 min-w-0">
+                              <p className="font-semibold text-xs">
+                                Don't have all the requested documents?
+                              </p>
+                              <p className="text-[11px] opacity-90 leading-relaxed">
+                                You can upload what you have right now or click{" "}
+                                <strong className="font-semibold">
+                                  "Proceed with given documents"
+                                </strong>{" "}
+                                below.
+                              </p>
+                              <p className="text-[11px] font-medium text-amber-800 dark:text-amber-200 pt-0.5">
+                                ⚠️ Your suggestion result will be limited according to the documents
+                                you provided.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Hidden Native File Input */}
+                          <input
+                            type="file"
+                            ref={fileInputRef}
+                            accept="image/*,application/pdf"
+                            className="hidden"
+                            onChange={handleMissingDocUpload}
                           />
-                          Re-Check & Resume
-                        </Button>
 
-                        <Button
-                          size="sm"
-                          disabled={isUploadingMissingDoc}
-                          onClick={() => {
-                            if (missingDocsList.length > 0) {
-                              setShowMissingDocsConfirmDialog(true);
-                            } else {
-                              handleResumeWorkflow(false);
-                            }
-                          }}
-                          className="bg-brand hover:bg-brand/90 gap-1.5"
-                        >
-                          Done Uploads — Continue <ArrowRight className="size-4" />
-                        </Button>
-                      </div>
+                          {/* Document List Grid */}
+                          <div className="space-y-3">
+                            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                              Required Items ({missingDocsList.length})
+                            </h3>
+                            <div className="grid grid-cols-1 gap-3">
+                              {missingDocsList.map((docName, idx) => {
+                                const isThisUploading =
+                                  isUploadingMissingDoc && selectedUploadDocType === docName;
+                                const isUploaded = uploadSuccessDoc === docName;
+                                const isPhoneReq = /mobile|phone|contact number/i.test(docName);
+
+                                return (
+                                  <div
+                                    key={idx}
+                                    className={`p-4 rounded-xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 overflow-hidden ${
+                                      isUploaded
+                                        ? "border-sage/50 bg-sage/5"
+                                        : "border-line bg-ice-2/30 hover:border-brand/40"
+                                    }`}
+                                  >
+                                    <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+                                      <div
+                                        className={`grid size-9 place-items-center rounded-lg shrink-0 mt-0.5 sm:mt-0 ${
+                                          isUploaded
+                                            ? "bg-sage/15 text-sage"
+                                            : isPhoneReq
+                                              ? "bg-brand/15 text-brand"
+                                              : "bg-brand/10 text-brand"
+                                        }`}
+                                      >
+                                        {isUploaded ? (
+                                          <Check className="size-4" />
+                                        ) : isPhoneReq ? (
+                                          <Phone className="size-4" />
+                                        ) : (
+                                          <FileText className="size-4" />
+                                        )}
+                                      </div>
+                                      <div className="min-w-0 flex-1 pr-1">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <span className="text-sm font-semibold text-foreground break-words">
+                                            {docName}
+                                          </span>
+                                          <span className="text-[10px] px-2 py-0.5 rounded font-medium bg-amber-500/15 text-amber-700 dark:text-amber-300">
+                                            Mandatory
+                                          </span>
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                                          {isUploaded
+                                            ? "Verified · Auto-resuming run..."
+                                            : isPhoneReq
+                                              ? "Enter your 10-digit number for SMS alerts & DBT (no file needed)"
+                                              : "PDF or clear photo (max 10MB)"}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    {isPhoneReq && !isUploaded ? (
+                                      /* Inline Text Input for Phone Number */
+                                      <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full sm:w-auto shrink-0 pt-1 sm:pt-0">
+                                        <Input
+                                          type="tel"
+                                          placeholder="10-digit mobile number"
+                                          value={phoneInputs[docName] ?? profile?.phone ?? ""}
+                                          onChange={(e) =>
+                                            setPhoneInputs((prev) => ({
+                                              ...prev,
+                                              [docName]: e.target.value,
+                                            }))
+                                          }
+                                          className="h-8 text-xs w-full sm:w-44 bg-card border-line"
+                                        />
+                                        <Button
+                                          size="sm"
+                                          disabled={isSavingPhone || isUploadingMissingDoc}
+                                          onClick={() =>
+                                            handleSavePhone(
+                                              docName,
+                                              phoneInputs[docName] ?? profile?.phone ?? "",
+                                            )
+                                          }
+                                          className="h-8 px-3 text-xs bg-brand hover:bg-brand/90 text-white shrink-0 w-full sm:w-auto"
+                                        >
+                                          {isSavingPhone ? (
+                                            <>
+                                              <Loader2 className="size-3 animate-spin mr-1" />{" "}
+                                              Saving...
+                                            </>
+                                          ) : (
+                                            "Save Number"
+                                          )}
+                                        </Button>
+                                      </div>
+                                    ) : (
+                                      /* Standard Document File Uploader Button */
+                                      <Button
+                                        size="sm"
+                                        variant={isUploaded ? "outline" : "default"}
+                                        disabled={isUploadingMissingDoc}
+                                        onClick={() => triggerUploadForDoc(docName)}
+                                        className={`shrink-0 w-full sm:w-auto min-w-[120px] gap-1.5 text-xs ${
+                                          isUploaded
+                                            ? "border-sage/40 text-sage hover:bg-sage/10"
+                                            : "bg-brand hover:bg-brand/90"
+                                        }`}
+                                      >
+                                        {isThisUploading ? (
+                                          <>
+                                            <Loader2 className="size-3.5 animate-spin" />{" "}
+                                            Extracting...
+                                          </>
+                                        ) : isUploaded ? (
+                                          <>
+                                            <Check className="size-3.5" /> Uploaded
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Upload className="size-3.5" /> Upload File
+                                          </>
+                                        )}
+                                      </Button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Active Extraction / Gemini Vision Progress Indicator */}
+                          {uploadExtractionStep && (
+                            <div className="p-3.5 rounded-lg bg-brand/10 border border-brand/25 text-xs text-brand font-medium flex items-center gap-2.5 animate-pulse">
+                              <Loader2 className="size-4 animate-spin shrink-0" />
+                              <span>{uploadExtractionStep}</span>
+                            </div>
+                          )}
+
+                          {/* Action Controls & Continue Button */}
+                          <div className="pt-4 border-t border-line flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={isUploadingMissingDoc}
+                              onClick={() => handleResumeWorkflow(false)}
+                              className="gap-1.5 text-xs h-9"
+                            >
+                              <RefreshCw
+                                className={`size-3.5 ${isUploadingMissingDoc ? "animate-spin" : ""}`}
+                              />
+                              Re-Check & Resume
+                            </Button>
+
+                            <Button
+                              size="sm"
+                              disabled={isUploadingMissingDoc}
+                              onClick={() => {
+                                if (missingDocsList.length > 0) {
+                                  setShowMissingDocsConfirmDialog(true);
+                                } else {
+                                  handleResumeWorkflow(false);
+                                }
+                              }}
+                              className="bg-brand hover:bg-brand/90 gap-1.5 text-xs h-9 font-medium shadow-sm"
+                            >
+                              Proceed with given documents <ArrowRight className="size-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Confirmation Dialog: Proceed with Incomplete Documents */}
                       <Dialog
@@ -1806,50 +2278,66 @@ export function AssistantPage() {
                       >
                         <DialogContent className="sm:max-w-md">
                           <DialogHeader>
-                            <DialogTitle className="flex items-center gap-2 text-amber-600 text-base">
+                            <DialogTitle className="flex items-center gap-2 text-amber-600 text-base font-display">
                               <FileWarning className="size-5" />
-                              Proceed with Incomplete Documents?
+                              Proceed with Given Documents?
                             </DialogTitle>
                           </DialogHeader>
 
                           <div className="space-y-3 py-2 text-xs text-muted-foreground">
-                            <p>The following mandatory document(s) have not been uploaded yet:</p>
-                            <div className="flex flex-wrap gap-1.5">
-                              {missingDocsList.map((doc, i) => (
-                                <span
-                                  key={i}
-                                  className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-800 dark:text-amber-200 font-semibold text-[11px]"
-                                >
-                                  {doc}
-                                </span>
-                              ))}
+                            <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200 space-y-1.5">
+                              <p className="font-semibold text-xs flex items-center gap-1.5">
+                                <AlertCircle className="size-4 text-amber-600 shrink-0" />
+                                Limited Suggestions Warning
+                              </p>
+                              <p className="text-xs font-semibold">
+                                Your suggestion result will be limited according to the documents
+                                you provided.
+                              </p>
+                              <p className="text-[11px] opacity-90 leading-relaxed">
+                                Any unprovided requirements will be flagged with{" "}
+                                <strong>"Review Required"</strong> in your application draft and
+                                will require subsequent manual departmental review.
+                              </p>
                             </div>
-                            <p className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300">
-                              If you continue without uploading these documents, your application
-                              draft will be generated with <strong>"Review Required"</strong> flags
-                              for missing proof and will require manual departmental review.
-                            </p>
+
+                            <div>
+                              <p className="font-medium text-foreground mb-1.5">
+                                Unprovided document(s):
+                              </p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {missingDocsList.map((doc, i) => (
+                                  <span
+                                    key={i}
+                                    className="px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-800 dark:text-amber-200 font-semibold text-[11px]"
+                                  >
+                                    {doc}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
                           </div>
 
-                          <div className="flex items-center justify-end gap-2 pt-3 border-t border-line">
+                          <DialogFooter className="gap-2 pt-3 border-t border-line">
                             <Button
                               variant="outline"
                               size="sm"
                               onClick={() => setShowMissingDocsConfirmDialog(false)}
+                              className="text-xs"
                             >
-                              Upload Remaining Docs
+                              Upload More Docs
                             </Button>
                             <Button
                               size="sm"
-                              className="bg-brand hover:bg-brand/90 gap-1"
+                              className="bg-brand hover:bg-brand/90 gap-1.5 text-xs"
                               onClick={() => handleResumeWorkflow(true)}
                             >
-                              Proceed Anyway <ArrowRight className="size-3.5" />
+                              Proceed with Given Documents <ArrowRight className="size-3.5" />
                             </Button>
-                          </div>
+                          </DialogFooter>
                         </DialogContent>
                       </Dialog>
-                    </div>
+                    </>
                   ) : candidateSchemes.length > 0 ? (
                     /* 3. Discovered Candidate Schemes list */
                     <div className="space-y-6">
@@ -1920,6 +2408,42 @@ export function AssistantPage() {
                             </div>
                           </div>
                         ))}
+                      </div>
+                    </div>
+                  ) : status === "ERROR" ? (
+                    /* Error State with Retry Button */
+                    <div className="rounded-xl border border-red-500/30 bg-card p-6 shadow-sm space-y-4 animate-in fade-in duration-300">
+                      <div className="flex items-start gap-3">
+                        <div className="grid size-10 place-items-center rounded-xl bg-red-500/15 text-red-600 shrink-0">
+                          <AlertCircle className="size-5" />
+                        </div>
+                        <div>
+                          <h2 className="text-base font-bold font-display text-foreground">
+                            Agent Workforce Encountered an Issue
+                          </h2>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {errorMessage ||
+                              "The backend service could not be reached or encountered an error while processing your request."}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="pt-2 flex items-center gap-3">
+                        <Button
+                          size="sm"
+                          onClick={handleRetry}
+                          className="bg-brand hover:bg-brand/90 gap-1.5 text-xs"
+                        >
+                          <RefreshCw className="size-3.5" />
+                          Retry Inquiry
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleNewChat}
+                          className="text-xs"
+                        >
+                          Start New Chat
+                        </Button>
                       </div>
                     </div>
                   ) : (

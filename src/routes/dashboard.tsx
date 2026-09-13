@@ -8,7 +8,6 @@ import {
   ApplicationRow,
   ApplicationTimeline,
   NextBestAction,
-  ProgressStepper,
   SectionHeading,
   MetricCard,
   NotificationCard,
@@ -116,7 +115,19 @@ function DashboardPage() {
                 updated: a.updated_at ? new Date(a.updated_at).toLocaleDateString() : "Today",
               };
             });
-            setApplicationsList(mappedApps);
+
+            // Deduplicate applications by name
+            const dedupedApps: any[] = [];
+            const seenSchemeNames = new Set<string>();
+            for (const app of mappedApps) {
+              const key = app.name.toLowerCase().trim();
+              if (!seenSchemeNames.has(key)) {
+                seenSchemeNames.add(key);
+                dedupedApps.push(app);
+              }
+            }
+
+            setApplicationsList(dedupedApps);
 
             // Process documents
             const docs = docsRes.data || [];
@@ -254,8 +265,6 @@ function DashboardPage() {
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">{subtitleText}</p>
         </div>
-
-        <ProgressStepper />
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <MetricCard

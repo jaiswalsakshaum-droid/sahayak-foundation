@@ -472,6 +472,7 @@ export type DocumentValidationResult = {
   extractedFields: Record<string, string>;
   documentId?: string;
   status?: string;
+  alreadyVerified?: boolean;
 };
 
 /**
@@ -505,6 +506,59 @@ export async function validateDocument(
       return err("Authentication session required to upload documents.");
     }
 
+    // 0. Deduplication check: check if citizen already has a verified copy of this document type
+    const { data: existingDocs } = await supabase
+      .from("documents")
+      .select("id, document_type, file_name, status, confidence, extracted_fields")
+      .eq("citizen_id", session.user.id);
+
+    const matchExisting = (existingDocs || []).find((ed) => {
+      const et = ed.document_type.toLowerCase();
+      const dt = documentType.toLowerCase();
+      return (
+        et === dt ||
+        et.includes(dt) ||
+        dt.includes(et) ||
+        ((et.includes("land") ||
+          et.includes("khasra") ||
+          et.includes("khatauni") ||
+          et.includes("patta") ||
+          et.includes("ror") ||
+          et.includes("ownership")) &&
+          (dt.includes("land") ||
+            dt.includes("khasra") ||
+            dt.includes("khatauni") ||
+            dt.includes("patta") ||
+            dt.includes("ror") ||
+            dt.includes("ownership"))) ||
+        ((et.includes("aadhaar") || et.includes("aadhar") || et.includes("identity")) &&
+          (dt.includes("aadhaar") || dt.includes("aadhar") || dt.includes("identity"))) ||
+        (et.includes("pan") && dt.includes("pan")) ||
+        ((et.includes("passbook") || et.includes("bank")) &&
+          (dt.includes("passbook") || dt.includes("bank"))) ||
+        (et.includes("income") && dt.includes("income")) ||
+        (et.includes("caste") && dt.includes("caste")) ||
+        ((et.includes("domicile") || et.includes("residence") || et.includes("address")) &&
+          (dt.includes("domicile") || dt.includes("residence") || dt.includes("address")))
+      );
+    });
+
+    if (matchExisting && matchExisting.status === "verified") {
+      // Document is already verified! Stop creating duplicate copies or re-extracting.
+      return ok({
+        isValid: true,
+        type: matchExisting.document_type,
+        name: matchExisting.file_name,
+        issueDate: new Date().toLocaleDateString(),
+        validity: "Active",
+        confidence: Math.round(Number(matchExisting.confidence || 0.95) * 100),
+        extractedFields: matchExisting.extracted_fields || {},
+        documentId: matchExisting.id,
+        status: "verified",
+        alreadyVerified: true,
+      });
+    }
+
     let uploadedPath: string | null = null;
 
     if (file && (file instanceof Blob || typeof file.arrayBuffer === "function")) {
@@ -527,26 +581,44 @@ export async function validateDocument(
       }
     }
 
-    // Insert metadata record in documents table
-    const { data: insertedDoc, error: insertError } = await supabase
-      .from("documents")
-      .insert({
-        citizen_id: session.user.id,
-        document_type: documentType,
-        file_name: file?.name || "Uploaded_Document.pdf",
-        file_path: uploadedPath,
-        status: uploadedPath ? "pending" : "verified",
-        confidence: uploadedPath ? 0 : 0.95,
-        extracted_fields: uploadedPath ? { Status: "Extraction in progress..." } : {},
-      })
-      .select("id")
-      .single();
+    let targetDocId = matchExisting?.id;
 
-    if (insertError || !insertedDoc?.id) {
-      return err(
-        `Failed to register document in vault: ${insertError?.message || "Unknown error"}`,
-      );
+    if (matchExisting) {
+      // Update existing document instead of creating a duplicate row
+      await supabase
+        .from("documents")
+        .update({
+          file_name: file?.name || matchExisting.file_name || "Uploaded_Document.pdf",
+          file_path: uploadedPath || undefined,
+          status: uploadedPath ? "pending" : matchExisting.status,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", matchExisting.id);
+    } else {
+      // Insert fresh metadata record in documents table
+      const { data: insertedDoc, error: insertError } = await supabase
+        .from("documents")
+        .insert({
+          citizen_id: session.user.id,
+          document_type: documentType,
+          file_name: file?.name || "Uploaded_Document.pdf",
+          file_path: uploadedPath,
+          status: uploadedPath ? "pending" : "verified",
+          confidence: uploadedPath ? 0 : 0.95,
+          extracted_fields: uploadedPath ? { Status: "Extraction in progress..." } : {},
+        })
+        .select("id")
+        .single();
+
+      if (insertError || !insertedDoc?.id) {
+        return err(
+          `Failed to register document in vault: ${insertError?.message || "Unknown error"}`,
+        );
+      }
+      targetDocId = insertedDoc.id;
     }
+
+    const docIdToExtract = targetDocId!;
 
     // Fire Groq Vision extraction asynchronously.
     //
@@ -571,7 +643,7 @@ export async function validateDocument(
           "Content-Type": "application/json",
           "X-Sahayak-Internal-Secret": internalSecret,
         },
-        body: JSON.stringify({ document_id: insertedDoc.id }),
+        body: JSON.stringify({ document_id: docIdToExtract }),
       }).catch((err) => console.warn("[Sahayak] Direct backend dispatch failed:", err));
 
       // 2. Also dispatch via Supabase Edge Function if access token is available
@@ -583,14 +655,14 @@ export async function validateDocument(
             Authorization: `Bearer ${accessToken}`,
             apikey: import.meta.env["VITE_SUPABASE_ANON_KEY"] || "",
           },
-          body: JSON.stringify({ document_id: insertedDoc.id }),
+          body: JSON.stringify({ document_id: docIdToExtract }),
         }).catch((err) => console.warn("[Sahayak] Edge function dispatch error:", err));
       }
     }
 
     return ok({
       isValid: true,
-      documentId: insertedDoc.id,
+      documentId: docIdToExtract,
       type: documentType,
       name: file?.name || "Uploaded_Document.pdf",
       issueDate: new Date().toLocaleDateString(),
@@ -599,7 +671,7 @@ export async function validateDocument(
       status: uploadedPath ? "pending" : "verified",
       extractedFields: {
         Status: uploadedPath ? "Extraction in progress via Vision AI..." : "Verified",
-        "Document ID": insertedDoc.id.slice(0, 8).toUpperCase(),
+        "Document ID": docIdToExtract.slice(0, 8).toUpperCase(),
       },
     });
   } catch (e: any) {
