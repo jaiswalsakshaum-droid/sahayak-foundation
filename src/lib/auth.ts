@@ -132,6 +132,14 @@ export async function requireAuth() {
       to: "/login",
     });
   }
+
+  const profile = await getCurrentProfile();
+  if (profile && profile.role === "admin") {
+    throw redirect({
+      to: "/admin",
+    });
+  }
+
   return session;
 }
 

@@ -10,8 +10,6 @@ import {
   Activity,
   Menu,
   X,
-  Sparkles,
-  ExternalLink,
   Radio,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -146,20 +144,8 @@ export function AdminLayout({ children, title, subtitle }: AdminLayoutProps) {
         </div>
       </div>
 
-      {/* Bottom Profile, Citizen Portal Switch & Sign Out */}
+      {/* Bottom Profile & Sign Out */}
       <div className="space-y-3 border-t border-slate-800/80 pt-4">
-        {/* Switch to Citizen View */}
-        <Link
-          to="/dashboard"
-          className="flex items-center justify-between rounded-lg border border-slate-800/80 bg-slate-900/40 px-3 py-2 text-xs text-slate-400 hover:border-slate-700 hover:text-slate-200 transition-colors"
-        >
-          <span className="flex items-center gap-2">
-            <Sparkles className="size-3.5 text-indigo-400" />
-            Citizen Portal
-          </span>
-          <ExternalLink className="size-3 text-slate-500" />
-        </Link>
-
         {/* User Card */}
         <div className="flex items-center justify-between rounded-lg bg-slate-900/80 p-2.5 border border-slate-800/80">
           <div className="flex items-center gap-2.5 min-w-0">
